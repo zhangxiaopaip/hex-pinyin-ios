@@ -1,0 +1,42 @@
+name: inspect-ipa
+
+# One-off diagnostic: unpack the built IPA and report what actually shipped
+# (does HEXKeyboard.appex contain the pinyin dictionary?).
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Run id holding the hex-ipa artifact
+        required: true
+        default: "45778067435"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: hex-ipa
+          run-id: ${{ inputs.run_id }}
+          repository: ${{ github.repository }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: out
+
+      - name: List artifact and IPA contents
+        run: |
+          set -euo pipefail
+          echo "== artifact files =="
+          find out -type f -printf '%p  %s\n'
+          echo
+          for ipa in $(find out -name '*.ipa'); do
+            echo "== $ipa =="
+            unzip -l "$ipa" | head -40
+            echo "-- appex resources --"
+            unzip -l "$ipa" | grep -i -E "appex|tsv|Pinyin|bundle" | head -40
+            echo "-- any tsv anywhere --"
+            unzip -l "$ipa" | grep -i "\.tsv" | head -40 || echo "NO TSV FOUND"
+          done
