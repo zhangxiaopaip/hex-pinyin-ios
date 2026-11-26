@@ -55,11 +55,33 @@ jobs:
 
       - name: Ensure an iOS SDK
         run: |
+          set -o pipefail
           # A runner image can advertise iphoneos in -showsdks while the platform itself is
-          # still a stub that has to be downloaded, and the archive then has no destination
-          # to aim at: "iOS 26.0 is not installed". Asking for it is a no-op once it is there.
-          sudo xcodebuild -downloadPlatform iOS
-          xcodebuild -showsdks | grep -i iphoneos
+          # still a stub that has to be downloaded, and the archive then has no destination to
+          # aim at ("iOS 26.0 is not installed"). A real SDK carries SDKSettings.plist; a stub
+          # does not, which is how this tells them apart.
+          sdk_path() { xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || true; }
+          has_sdk() { p=$(sdk_path); [ -n "$p" ] && [ -f "$p/SDKSettings.plist" ]; }
+
+          xcodebuild -showsdks | grep -i iphoneos || true
+          if has_sdk; then
+            echo "iOS SDK present: $(sdk_path)"
+            exit 0
+          fi
+          # Asking for a platform that is already there is a no-op; asking can also fail on a
+          # busy runner ("Unable to connect to simulator", exit 70), so try again before
+          # giving up rather than failing a five-minute build on a transient.
+          for attempt in 1 2 3; do
+            if sudo xcodebuild -downloadPlatform iOS; then break; fi
+            echo "downloadPlatform failed (attempt $attempt)"
+            sleep 20
+          done
+          if ! has_sdk; then
+            echo "No iOS SDK after downloading it" >&2
+            xcodebuild -showsdks || true
+            exit 1
+          fi
+          echo "iOS SDK: $(sdk_path)"
 
       - name: Install XcodeGen
         run: brew install xcodegen
