@@ -32,7 +32,7 @@ command -v xcodebuild >/dev/null 2>&1 || {
 }
 
 # The cleanup tagger's Core ML model is kept out of git; the generated project needs it.
-scripts/fetch-cleanup-model.sh
+sh scripts/fetch-cleanup-model.sh
 
 # A personal build lives outside the App Store's identifiers and gives up the group, which
 # the keyboard survives: every reader of the group's defaults and container takes nil.
