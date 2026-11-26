@@ -71,6 +71,14 @@ if [ "${UNSIGNED:-1}" = 1 ]; then
     echo "The archive holds no HEX.app" >&2
     exit 1
   }
+  # A file whose extension XcodeGen doesn't know ships in no bundle at all, silently: the
+  # keyboard would type pinyin with nothing to pick, which is exactly how this broke before.
+  for needed in "$app/PlugIns/HEXKeyboard.appex/Wanxiang.pinyin"; do
+    [ -f "$needed" ] || {
+      echo "Missing $(basename "$needed"): the Chinese keyboard would offer no candidates" >&2
+      exit 1
+    }
+  done
   # An .ipa is a zip of Payload/, the app extensions riding inside the app as built.
   mkdir -p "$build/Payload"
   cp -R "$app" "$build/Payload/HEX.app"

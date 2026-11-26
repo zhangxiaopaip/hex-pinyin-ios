@@ -47,7 +47,7 @@ final class ChineseCandidateBar: UIView {
         applyPalette()
     }
 
-    required init?(coder: NSCoder) { nil }
+    required init?(coder: NSCoder) { fatalError("ChineseCandidateBar is laid out by hand") }
 
     private func configureArrow(_ button: UIButton, symbol: String) {
         let image = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold))
