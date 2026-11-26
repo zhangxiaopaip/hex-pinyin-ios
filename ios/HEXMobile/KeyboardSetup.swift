@@ -7,7 +7,13 @@ import UIKit
 @MainActor
 @Observable
 final class KeyboardSetupMonitor {
-    static let keyboardBundleID = "anomaly.hex.mobile.keyboard"
+    /// The keyboard's identifier. A build that renames the app renames its keyboard with it
+    /// (`com.hex.personal.hex` keeps its keyboard at `com.hex.personal.hex.keyboard`), so this
+    /// cannot be the one identifier an App Store build happens to use: a personal install would
+    /// look for a keyboard nobody has, and report the keyboard as never added.
+    static var keyboardBundleID: String {
+        (Bundle.main.bundleIdentifier ?? "anomaly.hex.mobile") + ".keyboard"
+    }
 
     private let bridge: KeyboardBridge
     private let observers = NotificationObservers()
@@ -86,7 +92,12 @@ final class KeyboardSetupMonitor {
             return
         }
 
-        let latest = bridge.fullAccess(activeSince: activeSince)
+        // Without the App Group nothing the keyboard reports can reach Hex: the switch can be
+        // on in Settings and this would still read "unconfirmed" forever, so setup would never
+        // finish. Such a build (a free Apple ID's, see build-ipa.sh) can't be told either way,
+        // and its keyboard works — the words live in its own container — so the step passes.
+        let groupWorks = KeyboardBridge.appGroupAvailable
+        let latest = groupWorks ? bridge.fullAccess(activeSince: activeSince) : .on
         if fullAccess != latest { fullAccess = latest }
         if let keyboards = UserDefaults.standard.stringArray(forKey: "AppleKeyboards") {
             keyboardAdded = keyboards.contains(Self.keyboardBundleID) || fullAccessOn

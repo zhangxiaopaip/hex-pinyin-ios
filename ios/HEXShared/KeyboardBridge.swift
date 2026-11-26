@@ -492,6 +492,13 @@ nonisolated enum KeyboardFullAccess: Equatable, Sendable {
 @MainActor
 struct KeyboardBridge {
     nonisolated static let appGroup = "group.anomaly.hex.mobile"
+    /// Whether this install can use the group at all. A build made for a free Apple ID drops
+    /// the App Group entitlement (`PERSONAL_PREFIX` in scripts/build-ipa.sh), and iOS then
+    /// hands out no container: every write the keyboard makes about itself lands nowhere, so
+    /// Hex can never hear from it, and must not treat that silence as "Full Access is off".
+    nonisolated static var appGroupAvailable: Bool {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup) != nil
+    }
     /// Posted by the keyboard each time it reports Full Access (`recordFullAccess`).
     nonisolated static let fullAccessDarwinNotification = "anomaly.hex.mobile.keyboard.fullAccess"
     /// The keyboard's Darwin notification, forwarded on the main thread once
