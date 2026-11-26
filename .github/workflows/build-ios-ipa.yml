@@ -47,6 +47,15 @@ jobs:
             exit 1
           fi
 
+      - name: Ensure an iOS SDK
+        run: |
+          # A fresh runner ships Xcode without the iOS platform, and a device build has no
+          # destination to aim at until it is downloaded.
+          if ! xcodebuild -showsdks 2>/dev/null | grep -q iphoneos; then
+            sudo xcodebuild -downloadPlatform iOS
+          fi
+          xcodebuild -showsdks | grep -i iphoneos
+
       - name: Install XcodeGen
         run: brew install xcodegen
 
