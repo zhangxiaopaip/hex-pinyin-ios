@@ -98,20 +98,40 @@ nonisolated final class PinyinIndex: @unchecked Sendable {
         }
     }
 
+    /// How many keys a first letter holds in a table: 0 where the letter starts no syllable
+    /// at all (i, u and v are spelled yi, wu and yu).
+    func recordCount(for letter: Character, in table: Table = .full) -> Int {
+        guard let bucket = bucket(for: letter, in: table) else { return 0 }
+        return bucket.count
+    }
+
+    /// Where a first letter's bucket starts, and how many keys it holds.
+    ///
+    /// The table's second word is the bucket's **size in bytes**, not its record count: the
+    /// count opens the bucket's body, after which come the records' offsets. Reading the size
+    /// as a count made the binary search start far past the last record and give up on its
+    /// first probe, so every lookup — every pinyin, every prefix — came back empty and the
+    /// keyboard offered no candidates at all.
+    private func bucket(for letter: Character, in table: Table) -> (start: Int, count: Int)? {
+        guard let mapping, let ascii = letter.asciiValue, ascii >= 97, ascii <= 122 else { return nil }
+        let base = tableOffset(table)
+        guard base > 0 else { return nil }
+        let entryAt = base + Int(ascii - 97) * 8
+        guard entryAt + 8 <= mapping.count else { return nil }
+        let start = Int(Self.u32(mapping, entryAt))
+        guard start >= 4, start + 4 <= mapping.count else { return nil }
+        let count = Int(Self.u32(mapping, start))
+        guard count > 0 else { return nil }
+        return (start, count)
+    }
+
     /// Every record whose key is `key` exactly, in the order the file holds them.
     func entries(for key: String, in table: Table = .full) -> [Entry] {
-        guard let mapping, !key.isEmpty else { return [] }
+        guard let mapping, !key.isEmpty, let first = key.first else { return [] }
         let wanted = Array(key.utf8)
-        guard let first = wanted.first, first >= 97, first <= 122 else { return [] }
-        let base = tableOffset(table)
-        guard base > 0 else { return [] }
-        let entryAt = base + Int(first - 97) * 8
-        guard entryAt + 8 <= mapping.count else { return [] }
-        let start = Int(Self.u32(mapping, entryAt))
-        guard start >= 4, start + 4 <= mapping.count else { return [] }
-        // The bucket body starts with its record count; the table's second word is its size.
-        let count = Int(Self.u32(mapping, start))
-        guard count > 0 else { return [] }
+        guard let bucket = bucket(for: first, in: table) else { return [] }
+        let start = bucket.start
+        let count = bucket.count
 
         var low = 0
         var high = count - 1

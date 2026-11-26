@@ -43,8 +43,11 @@ struct VerifyPinyinIndex {
         expect("nih", .prefix, "你好")
         expect("nh", .abbrev, "你好")
 
+        // Every letter a pinyin syllable starts with has a bucket; i, u and v start none
+        // (they are spelled yi, wu and yu), so their buckets are empty by design.
         var empty: [Character] = []
-        for letter in "abcdefghijklmnopqrstuvwxyz" where index.entries(for: String(letter)).isEmpty {
+        for letter in "abcdefghijklmnopqrstuvwxyz"
+        where !"iuv".contains(letter) && index.recordCount(for: letter) == 0 {
             empty.append(letter)
         }
         if !empty.isEmpty {
