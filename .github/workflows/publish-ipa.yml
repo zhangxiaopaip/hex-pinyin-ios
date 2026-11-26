@@ -1,0 +1,65 @@
+name: publish-ipa
+
+# Takes the "hex-ipa" artifact produced by build-ios-ipa.yml and attaches the
+# raw .ipa files to a GitHub Release, so they can be downloaded as .ipa
+# instead of the always-zipped Actions artifact.
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Run id whose hex-ipa artifact should be published
+        required: true
+        default: "45778067435"
+      tag:
+        description: Release tag to create or update
+        required: true
+        default: "ipa-20261126"
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download build artifact from the given run
+        uses: actions/download-artifact@v4
+        with:
+          name: hex-ipa
+          run-id: ${{ inputs.run_id }}
+          repository: ${{ github.repository }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: out
+
+      - name: Collect the .ipa files
+        run: |
+          set -euo pipefail
+          find out -type f -name '*.ipa' -printf '%p  %s bytes\n'
+          mkdir -p dist
+          find out -type f -name '*.ipa' -exec cp {} dist/ \;
+          count=$(find dist -name '*.ipa' | wc -l)
+          if [ "$count" -eq 0 ]; then
+            echo "::error::no .ipa found inside the artifact"
+            exit 1
+          fi
+          ls -la dist
+
+      - name: Attach the .ipa files to a release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          name: Hex 语音输入法 + 中文拼音键盘（未签名 IPA）
+          body: |
+            未签名 IPA，自签后安装（Sideloadly / AltStore / SideStore / TrollStore 等）。
+
+            - `Hex-personal.ipa`：原始 bundle id `group.anomaly.hex.mobile` 的 App Group，
+              需要付费开发者账号（或个人证书配合 App Group 能力）。
+            - `Hex-free-account.ipa`：已换 bundle id 并去掉 App Group，
+              适合免费 Apple ID 自签 7 天。
+
+            已内置中文拼音键盘（全拼输入 + 候选选字）。
+          files: dist/*.ipa
+          fail_on_unmatched_files: true
+          draft: false
+          prerelease: true
