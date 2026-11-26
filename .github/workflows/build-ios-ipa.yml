@@ -49,11 +49,10 @@ jobs:
 
       - name: Ensure an iOS SDK
         run: |
-          # A fresh runner ships Xcode without the iOS platform, and a device build has no
-          # destination to aim at until it is downloaded.
-          if ! xcodebuild -showsdks 2>/dev/null | grep -q iphoneos; then
-            sudo xcodebuild -downloadPlatform iOS
-          fi
+          # A runner image can advertise iphoneos in -showsdks while the platform itself is
+          # still a stub that has to be downloaded, and the archive then has no destination
+          # to aim at: "iOS 26.0 is not installed". Asking for it is a no-op once it is there.
+          sudo xcodebuild -downloadPlatform iOS
           xcodebuild -showsdks | grep -i iphoneos
 
       - name: Install XcodeGen
