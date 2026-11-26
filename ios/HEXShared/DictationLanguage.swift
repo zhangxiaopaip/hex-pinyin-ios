@@ -136,7 +136,11 @@ nonisolated struct LanguageSettings {
             // default it would type English forever with no way to reach Chinese, so it gets
             // the two languages the Chinese keyboard needs, English first.
             if chosen.isEmpty, !KeyboardBridge.appGroupAvailable {
-                return [.english, .chinese]
+                // English first on an English iPhone, Chinese first on a Chinese one: the
+                // space bar still switches, but the language the typist expects is already up.
+                let preferred = Locale.preferredLanguages.first
+                    .flatMap { Locale(identifier: $0).language.languageCode?.identifier }
+                return preferred == "zh" ? [.chinese, .english] : [.english, .chinese]
             }
             return chosen
         }
