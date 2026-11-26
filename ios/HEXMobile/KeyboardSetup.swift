@@ -92,17 +92,16 @@ final class KeyboardSetupMonitor {
             return
         }
 
-        // Without the App Group nothing the keyboard reports can reach Hex: the switch can be
-        // on in Settings and this would still read "unconfirmed" forever, so setup would never
-        // finish. Such a build (a free Apple ID's, see build-ipa.sh) can't be told either way,
-        // and its keyboard works — the words live in its own container — so the step passes.
-        let groupWorks = KeyboardBridge.appGroupAvailable
-        let latest = groupWorks ? bridge.fullAccess(activeSince: activeSince) : .on
+        let latest = bridge.fullAccess(activeSince: activeSince)
         if fullAccess != latest { fullAccess = latest }
+        // A keyboard that ever reported anything ran: that is proof enough that it is added,
+        // which `AppleKeyboards` alone cannot give — an app reads that list only sometimes,
+        // and a build with its own identifiers asks about a name the list may never use.
+        let heard = bridge.fullAccessOnReport != nil || bridge.fullAccessOffReport != nil
         if let keyboards = UserDefaults.standard.stringArray(forKey: "AppleKeyboards") {
-            keyboardAdded = keyboards.contains(Self.keyboardBundleID) || fullAccessOn
+            keyboardAdded = keyboards.contains(Self.keyboardBundleID) || fullAccessOn || heard
         } else {
-            keyboardAdded = fullAccessOn ? true : nil
+            keyboardAdded = fullAccessOn || heard ? true : nil
         }
         microphone = AVAudioApplication.shared.recordPermission
         bridge.appMicrophoneAllowed = microphone == .granted

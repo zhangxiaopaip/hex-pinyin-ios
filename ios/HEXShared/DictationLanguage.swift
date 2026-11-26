@@ -120,8 +120,13 @@ nonisolated struct LanguageSettings {
     /// it is first written, the one layout chosen before (`settings.keyboardLayout`).
     var keyboardLanguages: [KeyboardLanguage] {
         get {
-            let stored = defaults?.stringArray(forKey: Key.keyboardLanguages)
-                ?? defaults?.string(forKey: Key.keyboardLayout).map { [$0] }
+            // An install without the App Group (a free Apple ID's build, see build-ipa.sh) can
+            // never be told what Hex's app chose, and nothing it stores is ever read: without
+            // this it would type English forever with no way to reach Chinese. Such an install
+            // gets the two languages Hex's Chinese keyboard needs, English first.
+            guard let defaults else { return [.english, .chinese] }
+            let stored = defaults.stringArray(forKey: Key.keyboardLanguages)
+                ?? defaults.string(forKey: Key.keyboardLayout).map { [$0] }
                 ?? []
             var seen = Set<KeyboardLanguage>()
             let koreanEnabled = KoreanKeyboardExperiment.isEnabled(in: defaults)
