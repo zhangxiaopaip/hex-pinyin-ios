@@ -15,7 +15,7 @@ import Foundation
 /// shipped file (`ios/scripts/verify-pinyin-index.swift`), which is how the field that emptied
 /// every lookup got found: the table's second word is the bucket's size in bytes, and reading
 /// it as a record count made the search probe past the last record and give up.
-nonisolated struct PinyinIndex: @unchecked Sendable {
+nonisolated final class PinyinIndex: @unchecked Sendable {
     struct Entry: Equatable {
         let text: String
         let weight: UInt32
