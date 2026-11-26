@@ -6,9 +6,10 @@ options:
     iOS: "18.0"
   xcodeVersion: "2660"
 packages:
+  # Vendored at 0.15.5 and compiled in Swift 5's language mode, whose witness thunks Swift
+  # 6.2's IRGen survives; see Vendor/FluidAudio/Package.swift.
   FluidAudio:
-    url: https://github.com/FluidInference/FluidAudio.git
-    exactVersion: 0.15.5
+    path: Vendor/FluidAudio
 settings:
   base:
     DEVELOPMENT_TEAM: 5NZ4Q7NXJ4

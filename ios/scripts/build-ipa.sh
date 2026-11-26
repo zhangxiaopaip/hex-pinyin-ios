@@ -47,14 +47,8 @@ fi
 
 xcodegen generate
 
-# The dependency graph is checked in; the generated project starts without it.
-pins=HEXMobile.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
-mkdir -p "$pins"
-cp Package.resolved "$pins/Package.resolved"
-
-# Resolving first keeps a mistyped pin out of a twenty-minute archive.
+# FluidAudio is vendored under Vendor/, so there is no graph to fetch or pin.
 xcodebuild -resolvePackageDependencies -project HEXMobile.xcodeproj -scheme HEXMobile \
-  -disableAutomaticPackageResolution -onlyUsePackageVersionsFromResolvedFile \
   -skipPackagePluginValidation -skipMacroValidation
 
 archive="$build/Hex.xcarchive"
@@ -64,7 +58,6 @@ if [ "${UNSIGNED:-1}" = 1 ]; then
     -configuration Release -destination 'generic/platform=iOS' \
     -archivePath "$archive" \
     -skipPackagePluginValidation -skipMacroValidation \
-    APPLICATION_EXTENSION_API_ONLY=NO \
     CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
 
   app="$archive/Products/Applications/HEX.app"
