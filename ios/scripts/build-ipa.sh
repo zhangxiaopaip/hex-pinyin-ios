@@ -47,6 +47,12 @@ fi
 
 xcodegen generate
 
+# Swift 6.2's IRGen aborts emitting a @Sendable thunk at the boundary between the Swift 5
+# FluidAudio module and Hex's Swift 6 code ("report_at_maximum_capacity" in
+# SyncCallEmission::setArgs). Compiling file by file emits it differently, and names the
+# file in the log if it ever aborts again.
+SWIFT_MODE_FLAGS="SWIFT_COMPILATION_MODE=singlefile"
+
 # FluidAudio is vendored under Vendor/, so there is no graph to fetch or pin.
 xcodebuild -resolvePackageDependencies -project HEXMobile.xcodeproj -scheme HEXMobile \
   -skipPackagePluginValidation -skipMacroValidation
@@ -58,6 +64,7 @@ if [ "${UNSIGNED:-1}" = 1 ]; then
     -configuration Release -destination 'generic/platform=iOS' \
     -archivePath "$archive" \
     -skipPackagePluginValidation -skipMacroValidation \
+    $SWIFT_MODE_FLAGS \
     CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
 
   app="$archive/Products/Applications/HEX.app"
@@ -76,6 +83,7 @@ else
     -configuration Release -destination 'generic/platform=iOS' \
     -archivePath "$archive" \
     -skipPackagePluginValidation -skipMacroValidation \
+    $SWIFT_MODE_FLAGS \
     -allowProvisioningUpdates
 
   xcodebuild -exportArchive -archivePath "$archive" \
