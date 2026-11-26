@@ -4,10 +4,15 @@ import Foundation
 /// twenty minutes on an archive. Run by `scripts/build-ipa.sh`:
 ///
 ///     swiftc -parse-as-library HEXShared/FullKeyboard/Chinese/PinyinIndex.swift \
-///         scripts/verify-pinyin-index.swift -o /tmp/verify-pinyin && /tmp/verify-pinyin
+///         HEXShared/FullKeyboard/Chinese/PinyinCorrection.swift \
+///         HEXShared/FullKeyboard/Chinese/PinyinDictionary.swift \
+///         scripts/verify-pinyin-stubs.swift scripts/verify-pinyin-index.swift \
+///         -o /tmp/verify-pinyin && /tmp/verify-pinyin
 ///
 /// The index is read by offset, so a wrong field is silent: the keyboard types bare letters
-/// with no candidate and nothing in the build complains. This asserts the lookups instead.
+/// with no candidate and nothing in the build complains. This asserts the lookups instead —
+/// the raw tables, and then the words a pinyin run spells. A run with a typo in it must find
+/// its word too, or the correction shipped with the keyboard is worth nothing.
 @main
 struct VerifyPinyinIndex {
     static func main() {
@@ -53,6 +58,47 @@ struct VerifyPinyinIndex {
         if !empty.isEmpty {
             failures += 1
             print("  FAIL buckets with no words: \(String(empty))")
+        }
+
+        // The dictionary as the keyboard reads it — the beam, the half-typed tail, the near
+        // keys — over the shipped file: what the bar will show, and how it read the run.
+        guard let dictionary = PinyinDictionary(fileURL: file) else {
+            fail("cannot read \(file.path) as a dictionary")
+        }
+        func expectWord(_ typed: String, _ wanted: String, spelling: String? = nil) {
+            let found = dictionary.candidates(for: typed, limit: 8)
+            let texts = found.map(\.text)
+            guard texts.prefix(3).contains(wanted) else {
+                failures += 1
+                print("  FAIL \(typed): wanted \(wanted), got \(texts.prefix(4))")
+                return
+            }
+            if let spelling, found.first?.spelling != spelling {
+                failures += 1
+                print("  FAIL \(typed): read as \(found.first?.spelling ?? "-"), wanted \(spelling)")
+                return
+            }
+            print("  ok   \(typed) -> \(texts.prefix(4).joined(separator: " "))  [\(found.first?.spelling ?? "")]")
+        }
+
+        expectWord("nihao", "你好", spelling: "nihao")
+        expectWord("zhang", "张")
+        expectWord("shijie", "世界", spelling: "shijie")
+        expectWord("zhongguo", "中国", spelling: "zhongguo")
+        // Two letters the wrong way round: no pinyin spells "zhagn", and the near key does.
+        expectWord("zhagn", "张", spelling: "zhang")
+        // A key held too long: the run is read again with the second letter taken out.
+        expectWord("nihhaoo", "你好", spelling: "nihao")
+
+        // The line above the words, syllables apart as 豆包 shows them.
+        for (run, apart) in [("nihao", "ni'hao"), ("zhongguo", "zhong'guo"), ("jintiantianqi", "jin'tian'tian'qi")] {
+            let line = dictionary.apart(run)
+            if line == apart {
+                print("  ok   apart \(run) -> \(line)")
+            } else {
+                failures += 1
+                print("  FAIL apart \(run) -> \(line), wanted \(apart)")
+            }
         }
 
         guard failures == 0 else { fail("\(failures) check(s) failed") }

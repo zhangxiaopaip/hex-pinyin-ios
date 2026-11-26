@@ -1007,6 +1007,8 @@ final class FullKeyboardView: UIView {
         chineseBar.isHidden = !composingChinese || selection != nil || emojiPanel != nil || showsRecording
         chineseBar.show(
             buffer: composingChinese ? engine.chinese.buffer : "",
+            spelling: composingChinese ? engine.chinese.spelling : "",
+            corrected: composingChinese && engine.chinese.corrected,
             words: composingChinese ? chineseWords : [],
             generation: engine.chinese.generation
         )

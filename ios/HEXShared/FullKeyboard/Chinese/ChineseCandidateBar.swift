@@ -1,62 +1,58 @@
 import UIKit
 
-/// 简体中文's candidate bar: the words the pinyin run spells, as Apple's Chinese keyboard
-/// shows them, in place of the predictive strip while a run composes.
+/// 简体中文's candidate bar, as 豆包's is: the pinyin composing on a line of its own above,
+/// its syllables joined by "'", and the words below it — the first in a filled capsule,
+/// because Space puts that one in, the rest plain beside it.
 ///
-/// It pages: the first page holds the likeliest words, `›` brings the rest, `‹` goes back.
-/// The bar sits exactly where the strip does (`KeyboardLayout.stripFrame`), so the Hex key
-/// keeps its place and the keys never move.
+/// It pages: the chevrons at the trailing edge bring the rest. The bar sits exactly where the
+/// strip does (`KeyboardLayout.stripFrame`), so the Hex key keeps its place and the keys never
+/// move.
 @MainActor
 final class ChineseCandidateBar: UIView {
     /// A word picked: the engine puts it in place of the run's letters.
     var onPick: ((String) -> Void)?
-    /// A page turned.
+    /// A page turned: true forward.
     var onPage: ((_ forward: Bool) -> Void)?
 
     var palette = FullKeyboardPalette(isDark: false) {
-        didSet { if palette.isDark != oldValue.isDark { applyPalette() } }
+        didSet { if palette != oldValue { applyPalette() } }
     }
 
+    /// The words on offer, and how the run was read to spell them.
     private var words: [String] = []
-    private var page = 0
+    private var buffer = ""
+    private var spelling = ""
+    private var corrected = false
     private var generation = -1
-    private var slots: [UIButton] = []
+    /// Where each page's words start: a page holds as many as its own widths leave room for.
+    private var pageStarts: [Int] = [0]
+    private var page = 0
+    /// The width the words were last split for.
+    private var splitWidth: CGFloat = 0
+
+    private let pinyinLabel = UILabel()
+    private var slots: [CandidateButton] = []
     private let previousButton = UIButton(type: .system)
     private let nextButton = UIButton(type: .system)
-    /// The pinyin the run has typed, at the bar's leading edge: the field shows the letters
-    /// too, but here they read as what is being composed rather than as text already typed.
-    private let bufferLabel = UILabel()
-    private var buffer = ""
-    /// The page size the words were last split for.
-    private var pageSize = 0
-    private let separatorLines = (0..<10).map { _ in UIView() }
 
-    /// How much of the bar the pinyin keeps, so a long run never squeezes the words out.
-    private var bufferWidth: CGFloat {
-        guard !buffer.isEmpty else { return 0 }
-        return min(104, max(56, bounds.width * 0.2))
-    }
-
-    /// How many words fit: about 40 pt a word, within what a thumb can hit.
-    private var perPage: Int {
-        let width = max(bounds.width - bufferWidth, 200)
-        return min(Self.maxSlots, max(5, Int(width / 40)))
-    }
-
-    /// The most words a page holds, so the buttons exist before the bar has its width.
-    private static let maxSlots = 9
+    private static let wordFont = UIFont.systemFont(ofSize: 16)
+    private static let firstWordFont = UIFont.systemFont(ofSize: 16, weight: .semibold)
+    /// Room a word keeps on either side of its text: the capsule needs a little more.
+    private static let wordPadding: CGFloat = 20
+    private static let firstWordPadding: CGFloat = 24
+    private static let inset: CGFloat = 8
+    /// The two chevrons' cell at the trailing edge: always reserved, so paging never re-splits.
+    private static let arrowCell: CGFloat = 32
+    private static let arrowWidth: CGFloat = 16
+    private static let capsuleRadius: CGFloat = 6
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .clear
-        bufferLabel.font = .systemFont(ofSize: 16)
-        bufferLabel.lineBreakMode = .byTruncatingHead
-        bufferLabel.isUserInteractionEnabled = false
-        addSubview(bufferLabel)
-        for line in separatorLines {
-            line.isUserInteractionEnabled = false
-            addSubview(line)
-        }
+        pinyinLabel.font = .systemFont(ofSize: 11)
+        pinyinLabel.lineBreakMode = .byTruncatingTail
+        pinyinLabel.isUserInteractionEnabled = false
+        addSubview(pinyinLabel)
         configureArrow(previousButton, symbol: "chevron.left")
         configureArrow(nextButton, symbol: "chevron.right")
         previousButton.addTarget(self, action: #selector(turnBack), for: .touchUpInside)
@@ -69,25 +65,27 @@ final class ChineseCandidateBar: UIView {
     required init?(coder: NSCoder) { fatalError("ChineseCandidateBar is laid out by hand") }
 
     private func configureArrow(_ button: UIButton, symbol: String) {
-        let image = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold))
+        let image = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 11, weight: .semibold))
         button.setImage(image, for: .normal)
-        button.tintColor = palette.stripText
         button.isHidden = true
     }
 
-    /// The run's pinyin, its words, and whether the run is new (the bar then shows its first page).
-    func show(buffer: String, words: [String], generation: Int) {
-        if buffer != self.buffer {
+    /// The run's pinyin, its words, and whether the run is new (the bar then shows its first
+    /// page). `spelling` is the pinyin as the dictionary read it, with a typo already repaired.
+    func show(buffer: String, spelling: String, corrected: Bool, words: [String], generation: Int) {
+        if buffer != self.buffer || spelling != self.spelling || corrected != self.corrected {
             self.buffer = buffer
-            bufferLabel.text = buffer.isEmpty
-                ? nil
-                : (PinyinDictionary.shared.isLoaded ? buffer : String(localized: "Dictionary missing"))
-            bufferLabel.isHidden = buffer.isEmpty
+            self.spelling = spelling
+            self.corrected = corrected
+            pinyinLabel.attributedText = pinyinLine()
             setNeedsLayout()
         }
         if generation != self.generation {
             self.generation = generation
-            page = 0
+            if page != 0 {
+                page = 0
+                rebuild()
+            }
         }
         if words != self.words {
             self.words = words
@@ -96,52 +94,115 @@ final class ChineseCandidateBar: UIView {
         }
     }
 
-    private var pages: Int {
-        let size = perPage
-        return max(1, (words.count + size - 1) / size)
+    /// The line above the words: the run as it was read — with the syllables apart, as 豆包
+    /// shows them — and, where a typo had to be repaired, what was typed and what it read as.
+    private func pinyinLine() -> NSAttributedString? {
+        guard !buffer.isEmpty else { return nil }
+        let plain: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 11),
+            .foregroundColor: palette.stripText,
+        ]
+        guard PinyinDictionary.shared.isLoaded else {
+            return NSAttributedString(string: String(localized: "Dictionary missing"), attributes: plain)
+        }
+        guard corrected, !spelling.isEmpty else {
+            return NSAttributedString(string: spelling.isEmpty ? buffer : spelling, attributes: plain)
+        }
+        let repaired: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 11, weight: .medium),
+            .foregroundColor: palette.actionFill,
+        ]
+        let line = NSMutableAttributedString(string: buffer, attributes: plain)
+        line.append(NSAttributedString(string: "  →  ", attributes: plain))
+        line.append(NSAttributedString(string: spelling, attributes: repaired))
+        return line
     }
 
-    /// One page's words.
-    private var pageWords: [String] {
-        let size = perPage
-        let start = min(page * size, max(0, words.count))
-        return Array(words[start..<min(start + size, words.count)])
+    // MARK: - Words
+
+    /// The width a word asks for, its capsule and the space beside it included.
+    private func width(of word: String, first: Bool) -> CGFloat {
+        let font = first ? Self.firstWordFont : Self.wordFont
+        let text = (word as NSString).size(withAttributes: [.font: font]).width
+        return ceil(text + (first ? Self.firstWordPadding : Self.wordPadding))
+    }
+
+    /// The room the words have: the bar, less its insets and the chevrons' cell.
+    private var wordsWidth: CGFloat {
+        max(120, bounds.width - 2 * Self.inset - Self.arrowCell)
+    }
+
+    /// Splits the words into pages by their own widths: a page holds what fits, so a row of
+    /// characters takes more of them than a row of phrases.
+    private func splitPages() {
+        let available = wordsWidth
+        var starts = [0]
+        var start = 0
+        while start < words.count {
+            var used: CGFloat = 0
+            var index = start
+            while index < words.count {
+                let width = width(of: words[index], first: index == 0)
+                if used + width > available, index > start { break }
+                used += width
+                index += 1
+            }
+            guard index < words.count else { break }
+            starts.append(index)
+            start = index
+        }
+        pageStarts = starts
+        if page >= starts.count { page = max(0, starts.count - 1) }
+    }
+
+    private var pageRange: Range<Int> {
+        let start = min(pageStarts[min(page, pageStarts.count - 1)], words.count)
+        let end = page + 1 < pageStarts.count ? pageStarts[page + 1] : words.count
+        return start..<min(max(start, end), words.count)
     }
 
     private func rebuild() {
-        let shown = pageWords
-        // Every slot the widest page holds exists from the first refresh: the bar is first
-        // shown before it is laid out, and a page must not lose the words it has room for now.
-        while slots.count < Self.maxSlots {
-            let button = UIButton(type: .custom)
-            button.titleLabel?.font = .systemFont(ofSize: 17)
+        splitPages()
+        let range = pageRange
+        while slots.count < range.count, slots.count < 16 {
+            let button = CandidateButton(type: .custom)
             button.titleLabel?.lineBreakMode = .byTruncatingTail
-            button.setTitleColor(palette.textBase, for: .normal)
-            button.setTitleColor(palette.stripText, for: .highlighted)
             button.addTarget(self, action: #selector(pickWord(_:)), for: .touchUpInside)
             slots.append(button)
             addSubview(button)
         }
         for (index, button) in slots.enumerated() {
-            let hasWord = index < shown.count
-            button.isHidden = !hasWord
-            if hasWord {
-                button.setTitle(shown[index], for: .normal)
-                button.accessibilityLabel = shown[index]
+            let wordIndex = range.lowerBound + index
+            guard wordIndex < range.upperBound else {
+                button.isHidden = true
+                continue
             }
+            let word = words[wordIndex]
+            // The capsule marks what Space would put in: the run's leading word, never a
+            // later page's first.
+            let leads = wordIndex == 0
+            button.isHidden = false
+            button.tag = wordIndex
+            button.setTitle(word, for: .normal)
+            button.titleLabel?.font = leads ? Self.firstWordFont : Self.wordFont
+            button.accessibilityLabel = word
+            button.backgroundColor = leads ? palette.actionFill : .clear
+            button.layer.cornerRadius = leads ? Self.capsuleRadius : 0
+            button.setTitleColor(leads ? .white : palette.textBase, for: .normal)
+            button.setTitleColor(leads ? UIColor(white: 1, alpha: 0.7) : palette.stripText, for: .highlighted)
         }
         previousButton.isHidden = page == 0
-        nextButton.isHidden = page + 1 >= pages
+        nextButton.isHidden = page + 1 >= pageStarts.count
         setNeedsLayout()
     }
 
     @objc private func pickWord(_ sender: UIButton) {
-        guard let title = sender.title(for: .normal) else { return }
-        onPick?(title)
+        guard words.indices.contains(sender.tag) else { return }
+        onPick?(words[sender.tag])
     }
 
     @objc private func turnForward() {
-        guard page + 1 < pages else { return }
+        guard page + 1 < pageStarts.count else { return }
         page += 1
         onPage?(true)
         rebuild()
@@ -154,61 +215,56 @@ final class ChineseCandidateBar: UIView {
         rebuild()
     }
 
-    /// Which page is showing, for the strip's own paging (◀ ▶ on the arrow keys).
+    /// Which page is showing.
     var currentPage: Int { page }
 
+    /// Turns a page, forward or back.
     func turn(_ forward: Bool) {
         forward ? turnForward() : turnBack()
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        // The bar is first shown before it is laid out: the page it can hold follows its width
-        // (and the pinyin's), so the words are split again once that is known.
-        if pageSize != perPage {
-            pageSize = perPage
+        // The bar is first shown before it is laid out: what a page holds follows its width,
+        // so the words are split again once that is known.
+        if splitWidth != bounds.width {
+            splitWidth = bounds.width
             rebuild()
             return
         }
         let height = bounds.height
-        let arrow: CGFloat = 18
-        let inset: CGFloat = 6
-        var x = inset
-        let bufferWidth = self.bufferWidth
-        bufferLabel.frame = CGRect(x: inset, y: 0, width: max(0, bufferWidth - 8), height: height)
-        x += bufferWidth
-        if !previousButton.isHidden {
-            previousButton.frame = CGRect(x: x, y: 0, width: arrow, height: height)
-            x += arrow
-        }
-        let trailingArrow = nextButton.isHidden ? 0 : arrow
-        let available = max(0, bounds.width - x - inset - trailingArrow)
-        let shown = pageWords
-        let slot = shown.isEmpty ? 0 : available / CGFloat(shown.count)
+        // The pinyin's line takes what an 11 pt line needs; the words take the rest of the row.
+        let band = min(14, max(12, height * 0.36))
+        pinyinLabel.frame = CGRect(x: Self.inset, y: 0, width: max(0, bounds.width - 2 * Self.inset), height: band)
+        let top = band
+        let rowHeight = max(0, height - band)
 
+        var x = Self.inset
+        let limit = Self.inset + wordsWidth
         for (index, button) in slots.enumerated() where !button.isHidden {
-            button.frame = CGRect(x: x + slot * CGFloat(index), y: 1, width: slot, height: height - 2)
+            let wordIndex = pageRange.lowerBound + index
+            guard words.indices.contains(wordIndex) else { continue }
+            let width = width(of: words[wordIndex], first: wordIndex == 0)
+            let room = max(0, limit - x)
+            button.frame = CGRect(x: x, y: top + 0.5, width: min(width, room), height: max(0, rowHeight - 1))
+            x += width
         }
-        if !nextButton.isHidden {
-            nextButton.frame = CGRect(x: bounds.width - inset - arrow, y: 0, width: arrow, height: height)
-        }
-
-        // Dividers between the words, as Apple's candidate bar has.
-        for (index, line) in separatorLines.enumerated() {
-            guard index < shown.count - 1, slot > 0 else { line.isHidden = true; continue }
-            line.isHidden = false
-            line.frame = CGRect(x: x + slot * CGFloat(index + 1), y: height * 0.28, width: 1 / max(traitCollection.displayScale, 1), height: height * 0.44)
-        }
+        let trailing = bounds.width - Self.inset - Self.arrowCell
+        previousButton.frame = CGRect(x: trailing, y: top, width: Self.arrowWidth, height: rowHeight)
+        nextButton.frame = CGRect(x: trailing + Self.arrowWidth, y: top, width: Self.arrowWidth, height: rowHeight)
     }
 
     private func applyPalette() {
-        bufferLabel.textColor = palette.stripText
-        for button in slots {
-            button.setTitleColor(palette.textBase, for: .normal)
-            button.setTitleColor(palette.stripText, for: .highlighted)
-        }
+        pinyinLabel.attributedText = pinyinLine()
         previousButton.tintColor = palette.stripText
         nextButton.tintColor = palette.stripText
-        for line in separatorLines { line.backgroundColor = palette.separator }
+        rebuild()
+    }
+}
+
+/// A word in the bar. It dims as a whole when pressed, so the capsule's fill dims with it.
+private final class CandidateButton: UIButton {
+    override var isHighlighted: Bool {
+        didSet { alpha = isHighlighted ? 0.55 : 1 }
     }
 }

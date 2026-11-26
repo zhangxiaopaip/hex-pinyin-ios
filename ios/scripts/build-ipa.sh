@@ -32,10 +32,14 @@ command -v xcodebuild >/dev/null 2>&1 || {
 }
 
 # The Chinese keyboard's index is read by offset, so a wrong field there is silent: bare
-# letters, no candidates, nothing in the build complaining. Check the shipped file first.
+# letters, no candidates, nothing in the build complaining. Check the shipped file first, the
+# index and the words a run spells — a typo's too, which is what the near keys are for.
 if command -v swiftc >/dev/null 2>&1; then
   swiftc -swift-version 6 -parse-as-library \
     HEXShared/FullKeyboard/Chinese/PinyinIndex.swift \
+    HEXShared/FullKeyboard/Chinese/PinyinCorrection.swift \
+    HEXShared/FullKeyboard/Chinese/PinyinDictionary.swift \
+    scripts/verify-pinyin-stubs.swift \
     scripts/verify-pinyin-index.swift \
     -o "$build/verify-pinyin-index"
   "$build/verify-pinyin-index"

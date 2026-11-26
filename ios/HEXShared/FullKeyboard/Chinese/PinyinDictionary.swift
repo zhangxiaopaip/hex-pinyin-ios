@@ -21,7 +21,6 @@ nonisolated final class PinyinDictionary: @unchecked Sendable {
 
     /// Read once per process: the first pinyin letter typed pays for the map.
     static let shared = PinyinDictionary.bundled()
-
     /// How many paths a run keeps per position: enough for every reading of a long run.
     private static let beam = 32
     /// How many half-typed syllables, and words of each, a run's end offers.
@@ -30,6 +29,10 @@ nonisolated final class PinyinDictionary: @unchecked Sendable {
     private static let partialPenalty = 1.5
     /// What a 简拼 (initials-only) reading costs: it is a guess, where a full pinyin is not.
     private static let abbrevPenalty = 2.5
+    /// What a reading repaired from doubled letters costs: a guess, against the run as typed.
+    private static let collapsePenalty = 2.5
+    /// How many readings a run keeps for ranking: far more than the bar ever shows.
+    private static let readingLimit = 400
     /// The longest key a single step can use, which bounds a lookup's steps.
     private static let maxKeyLength = 24
     /// The longest beginning of a pinyin the half-syllable table holds ("nih", not "nihao").
@@ -90,7 +93,9 @@ nonisolated final class PinyinDictionary: @unchecked Sendable {
         return nil
     }
 
-    private init?(fileURL: URL) {
+    /// A dictionary over a file: `bundled()` for the keyboard, and the check before a build
+    /// (`scripts/verify-pinyin-index.swift`) reads the shipped file through this.
+    init?(fileURL: URL) {
         guard let index = PinyinIndex(fileURL: fileURL) else { return nil }
         self.index = index
         self.logTotal = log(max(Double(index.totalWeight), 2))
@@ -140,21 +145,132 @@ nonisolated final class PinyinDictionary: @unchecked Sendable {
 
     // MARK: - Candidates
 
+    /// The run's pinyin with its syllables apart, as 豆包's bar shows it: "ni'hao", "zhong'guo".
+    /// The dictionary knows where a syllable ends and the next begins — "xian" is one, "xi'an"
+    /// two — so the split is read off its own keys rather than guessed at.
+    func apart(_ letters: String) -> String {
+        letters.split(separator: "'").map { apart(syllables: String($0)) }.joined(separator: "'")
+    }
+
+    private func apart(syllables run: String) -> String {
+        let letters = Array(run)
+        guard letters.count > 1 else { return run }
+        var done: [Int: [Int]] = [:]
+        var failed: Set<Int> = []
+        func ends(from start: Int) -> [Int]? {
+            if let cached = done[start] { return cached }
+            if failed.contains(start) { return nil }
+            var result: [Int]?
+            if start == letters.count {
+                result = []
+            } else {
+                for length in stride(from: min(6, letters.count - start), through: 1, by: -1) {
+                    let key = String(letters[start..<(start + length)])
+                    guard isSyllable(key), let rest = ends(from: start + length) else { continue }
+                    result = [start + length] + rest
+                    break
+                }
+            }
+            if let result { done[start] = result } else { failed.insert(start) }
+            return result
+        }
+        guard let split = ends(from: 0) else { return String(letters) }
+        var out: [String] = []
+        var start = 0
+        for end in split {
+            out.append(String(letters[start..<end]))
+            start = end
+        }
+        return out.joined(separator: "'")
+    }
+
+    /// Whether `key` is a pinyin syllable: the dictionary spells a character with it, where a
+    /// word of two characters or more is a word and not a syllable ("nihao" is not one).
+    private func isSyllable(_ key: String) -> Bool {
+        words(for: key).contains { $0.text.count == 1 }
+    }
+
+    /// What a run spells: the word, and the reading that found it.
+    struct Candidate: Sendable, Equatable {
+        let text: String
+        /// The run's syllables joined by "'" ("ni'hao"): the spelling the word was found
+        /// under, so a typo shows up as a spelling the typist did not type.
+        let spelling: String
+    }
+
+    /// One reading of a run: the words it spells, and what it scored.
+    private struct Reading {
+        let text: String
+        let spelling: String
+        let score: Double
+    }
+
     /// The words `input` (pinyin letters, no tones, no spaces) spells, the likeliest first:
     /// a word's pinyin run together, several words in a run, half a syllable at the run's end
     /// ("nih" -> 你好), and 简拼 initials ("nh" -> 你好).
-    func candidates(for input: String, limit: Int = 3) -> [String] {
-        let letters = Array(input.lowercased().utf8)
-        guard !letters.isEmpty, letters.count <= 40, limit > 0 else { return [] }
-        guard letters.allSatisfy({ $0 >= 97 && $0 <= 122 }) else { return [] }
+    ///
+    /// A run is read twice when a letter was typed twice ("nihhaoo"): once as it stands, once
+    /// with the doubles taken out. The two readings are ranked together, the repaired one at a
+    /// price, so 你好 can beat the 你哦 the letters also spell.
+    func candidates(for input: String, limit: Int = 3) -> [Candidate] {
+        let typed = Array(input.lowercased().utf8)
+        guard !typed.isEmpty, typed.count <= 40, limit > 0 else { return [] }
+        guard typed.allSatisfy({ $0 >= 97 && $0 <= 122 }) else { return [] }
 
+        var readings = read(typed)
+        let collapsed = PinyinCorrection.collapsingDoubles(typed)
+        if collapsed != typed, collapsed.count >= 2 {
+            readings += read(collapsed).map {
+                Reading(text: $0.text, spelling: $0.spelling, score: $0.score - Self.collapsePenalty)
+            }
+        }
+        guard !readings.isEmpty else { return [] }
+
+        // The typist's own picks move up: what they chose before is what they mean now.
+        let learned = UserWords.shared
+        // A syllable typed whole leads with the characters it spells, as Apple's keyboard
+        // does ("zhang" -> 张 长 章 涨 …, then 障碍, 长大), instead of putting whichever
+        // phrase is commoner than the character first.
+        let characters = Set(
+            words(for: String(decoding: typed, as: UTF8.self)).lazy.filter { $0.text.count == 1 }.map(\.text)
+        )
+        let ranked = readings.map {
+            Reading(text: $0.text, spelling: $0.spelling, score: $0.score + learned.boost(for: $0.text))
+        }.sorted { left, right in
+            let leftIsCharacter = characters.contains(left.text)
+            let rightIsCharacter = characters.contains(right.text)
+            if leftIsCharacter != rightIsCharacter { return leftIsCharacter }
+            return left.score > right.score
+        }
+
+        var seen = Set<String>()
+        var out: [Candidate] = []
+        out.reserveCapacity(min(limit, ranked.count))
+        for reading in ranked {
+            guard seen.insert(reading.text).inserted else { continue }
+            out.append(Candidate(text: reading.text, spelling: reading.spelling))
+            if out.count == limit { break }
+        }
+        return out
+    }
+
+    /// A run read syllable by syllable: the beam of readings to each position, the half-typed
+    /// tail, and 简拼 initials. A syllable that spells nothing is read through its near keys
+    /// as well (`PinyinCorrection`), which is how a swapped pair or a wrong initial still
+    /// finds its word.
+    private func read(_ letters: [UInt8]) -> [Reading] {
         struct Path {
             let score: Double
             let text: String
+            let spelling: String
+        }
+
+        func slice(_ start: Int, _ length: Int) -> String {
+            String(decoding: letters[start..<(start + length)], as: UTF8.self)
         }
 
         var best: [[Path]] = Array(repeating: [], count: letters.count + 1)
-        best[0] = [Path(score: 0, text: "")]
+        best[0] = [Path(score: 0, text: "", spelling: "")]
 
         for position in 0..<letters.count {
             guard !best[position].isEmpty else { continue }
@@ -162,13 +278,27 @@ nonisolated final class PinyinDictionary: @unchecked Sendable {
             let remaining = letters.count - position
             for path in paths {
                 for length in 1...min(Self.maxKeyLength, remaining) {
-                    let key = String(decoding: letters[position..<(position + length)], as: UTF8.self)
-                    let matched = words(for: key)
-                    guard !matched.isEmpty else { continue }
-                    for word in matched {
+                    let key = slice(position, length)
+                    let spelled = words(for: key)
+                    for word in spelled {
                         best[position + length].append(
-                            Path(score: path.score + word.logWeight - logTotal, text: path.text + word.text)
+                            Path(score: path.score + word.logWeight - logTotal,
+                                 text: path.text + word.text,
+                                 spelling: path.spelling.isEmpty ? key : path.spelling + "'" + key)
                         )
+                    }
+                    // A key that spells nothing may be a typo, and is read through its near
+                    // keys. One that spells something is read as it stands, so "zang" is 脏
+                    // and never 张: a correction only answers a spelling no word has.
+                    guard spelled.isEmpty else { continue }
+                    for near in PinyinCorrection.near(key) {
+                        for word in words(for: near.key) {
+                            best[position + length].append(
+                                Path(score: path.score + word.logWeight - logTotal - near.cost,
+                                     text: path.text + word.text,
+                                     spelling: path.spelling.isEmpty ? near.key : path.spelling + "'" + near.key)
+                            )
+                        }
                     }
                 }
             }
@@ -187,51 +317,36 @@ nonisolated final class PinyinDictionary: @unchecked Sendable {
         // 展改 and 战该 — while "zhongg" still reads as 中 and the letter it ends on.
         let spellsTheRun = !best[letters.count].isEmpty
         for position in 0..<letters.count where !best[position].isEmpty {
-            let tail = String(decoding: letters[position...], as: UTF8.self)
+            let tail = slice(position, letters.count - position)
             guard tail.count <= 6, tail.count >= 2 || !spellsTheRun else { continue }
             guard words(for: tail).isEmpty else { continue }
             for word in wordsStarting(with: tail, limit: Self.partials) {
                 for path in best[position].sorted { $0.score > $1.score }.prefix(Self.partials) {
                     found.append(
                         Path(score: path.score + word.logWeight - logTotal - Self.partialPenalty,
-                             text: path.text + word.text)
+                             text: path.text + word.text,
+                             spelling: path.spelling.isEmpty ? tail : path.spelling + "'" + tail)
                     )
                 }
             }
         }
 
-        // 简拼: initials only ("nh", "zg"), which Rime offers beside the full spelling.
-        let initials = String(decoding: letters, as: UTF8.self)
-        if initials.count >= 2, initials.count <= 6 {
-            for word in abbrevWords(for: initials) {
-                found.append(Path(score: word.logWeight - logTotal - Self.abbrevPenalty, text: word.text))
+        // 简拼: initials only ("nh", "zg"), which Rime offers beside the full spelling. Only
+        // when nothing spells the run: a spelled run's initials are the same word again.
+        if found.isEmpty {
+            let initials = String(decoding: letters, as: UTF8.self)
+            if initials.count >= 2, initials.count <= 6 {
+                for word in abbrevWords(for: initials) {
+                    found.append(Path(score: word.logWeight - logTotal - Self.abbrevPenalty,
+                                      text: word.text, spelling: initials))
+                }
             }
         }
 
-        // The typist's own picks move up: what they chose before is what they mean now.
-        let learned = UserWords.shared
-        // A syllable typed whole leads with the characters it spells, as Apple's keyboard
-        // does ("zhang" -> 张 长 章 涨 …, then 障碍, 长大), instead of putting whichever
-        // phrase is commoner than the character first.
-        let characters = Set(words(for: input).lazy.filter { $0.text.count == 1 }.map(\.text))
-        let scored = found.map { path in
-            Path(score: path.score + learned.boost(for: path.text), text: path.text)
-        }.sorted { left, right in
-            let leftIsCharacter = characters.contains(left.text)
-            let rightIsCharacter = characters.contains(right.text)
-            if leftIsCharacter != rightIsCharacter { return leftIsCharacter }
-            return left.score > right.score
-        }
-
-        var seen = Set<String>()
-        var out: [String] = []
-        out.reserveCapacity(min(limit, scored.count))
-        for path in scored {
-            guard seen.insert(path.text).inserted else { continue }
-            out.append(path.text)
-            if out.count == limit { break }
-        }
-        return out
+        return found
+            .sorted { $0.score > $1.score }
+            .prefix(Self.readingLimit)
+            .map { Reading(text: $0.text, spelling: $0.spelling, score: $0.score) }
     }
 }
 
