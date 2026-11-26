@@ -47,11 +47,10 @@ fi
 
 xcodegen generate
 
-# Swift 6.2's IRGen aborts emitting a @Sendable thunk at the boundary between the Swift 5
-# FluidAudio module and Hex's Swift 6 code ("report_at_maximum_capacity" in
-# SyncCallEmission::setArgs). Compiling file by file emits it differently, and names the
-# file in the log if it ever aborts again.
-SWIFT_MODE_FLAGS="SWIFT_COMPILATION_MODE=singlefile"
+# Swift 6.2's IRGen aborts emitting a @Sendable thunk ("report_at_maximum_capacity" in
+# SyncCallEmission::setArgs), and the SIL the optimizer hands it decides whether that thunk
+# is built at all. Unoptimized SIL sidesteps it; the archive is slower for it.
+SWIFT_MODE_FLAGS="SWIFT_OPTIMIZATION_LEVEL=-Onone"
 
 # FluidAudio is vendored under Vendor/, so there is no graph to fetch or pin.
 xcodebuild -resolvePackageDependencies -project HEXMobile.xcodeproj -scheme HEXMobile \
