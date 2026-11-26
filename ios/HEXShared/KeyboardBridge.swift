@@ -506,26 +506,90 @@ struct KeyboardBridge {
     /// domain, container or no container, and settings sync again.
     nonisolated static let appGroupProbe = "settings.appGroupProbe"
 
-    nonisolated static var appGroupAvailable: Bool {
-        if FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup) != nil {
-            return true
+    /// The App Groups this install's signature actually carries, the one Hex asks for first.
+    /// A sideloading tool re-signs with its own team's group — same entitlement, different
+    /// identifier (`group.<team>.hex.mobile`) — and every lookup by the requested name then
+    /// fails, which reads as "no App Group" and leaves the app and the keyboard each writing
+    /// settings the other never sees. The provisioning profile in the bundle names the real
+    /// ones, so the identifier is resolved rather than assumed.
+    nonisolated static let candidateGroups: [String] = {
+        var groups = [appGroup]
+        for group in provisionedGroups where !groups.contains(group) {
+            groups.append(group)
         }
-        return UserDefaults(suiteName: appGroup)?.string(forKey: appGroupProbe) != nil
+        return groups
+    }()
+
+    /// The group whose container exists, found once: the file system does not change under it.
+    nonisolated static let containerGroup: String? = candidateGroups.first {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: $0) != nil
     }
 
-    /// The app's side of `appGroupAvailable`: writes the stamp the keyboard looks for, straight
-    /// into the suite so a stripped signature writes into a domain no one else can see.
+    /// The group this install can really share through: a container that exists, or — where a
+    /// re-sign kept the entitlement and never made the container — a suite that carries the
+    /// other process's probe. The probe is read every time: it arrives while the keyboard runs.
+    nonisolated static var resolvedAppGroup: String? {
+        if let containerGroup { return containerGroup }
+        for group in candidateGroups
+        where UserDefaults(suiteName: group)?.string(forKey: appGroupProbe) != nil {
+            return group
+        }
+        return nil
+    }
+
+    /// Whether this install really has the App Group. Not the same as asking
+    /// `UserDefaults(suiteName:)` for nil: with the entitlement gone — a free Apple ID's build,
+    /// or anything a sideloading tool re-signed (they strip App Groups, which a free
+    /// certificate cannot carry) — iOS still hands back a defaults object. It is a private,
+    /// empty domain per process, so the app and the keyboard each read nothing of the other's
+    /// and every setting silently does nothing.
+    nonisolated static var appGroupAvailable: Bool {
+        resolvedAppGroup != nil
+    }
+
+    /// Writes the stamp the other process looks for, into every group this signature carries:
+    /// a stripped signature writes into a domain no one else can see, which is exactly the
+    /// signal that no group is shared. The keyboard writes it too, so the app can tell a
+    /// keyboard's report apart from its own.
     nonisolated static func writeAppGroupProbe() {
-        UserDefaults(suiteName: appGroup)?.set(Bundle.main.bundleIdentifier ?? "hex", forKey: appGroupProbe)
+        let stamp = Bundle.main.bundleIdentifier ?? "hex"
+        for group in candidateGroups {
+            UserDefaults(suiteName: group)?.set(stamp, forKey: appGroupProbe)
+        }
     }
 
-    /// Where settings live: the App Group when the install has one, else this process's own
-    /// defaults. The fallback keeps a stripped-signature keyboard usable on its own — its
+    /// Where settings live: the shared App Group when the install has one, else this process's
+    /// own defaults. The fallback keeps a stripped-signature keyboard usable on its own — its
     /// language, its switches, its learned words — instead of falling back to English forever.
     nonisolated static var storage: UserDefaults? {
-        if appGroupAvailable { return UserDefaults(suiteName: appGroup) }
+        if let group = resolvedAppGroup, let shared = UserDefaults(suiteName: group) {
+            return shared
+        }
         return .standard
     }
+
+    /// `com.apple.security.application-groups` from the provisioning profile this build was
+    /// signed with. A sideloaded .ipa has none until it is installed and signed, which is
+    /// exactly when it matters, so an unreadable profile simply resolves to `[]`.
+    nonisolated static let provisionedGroups: [String] = {
+        var bundle = Bundle.main.bundleURL
+        // The keyboard's profile is the app's: an .appex sits in PlugIns inside it.
+        if bundle.pathExtension == "appex" {
+            bundle = bundle.deletingLastPathComponent().deletingLastPathComponent()
+        }
+        let profileURL = bundle.appendingPathComponent("embedded.mobileprovision")
+        guard let profile = try? Data(contentsOf: profileURL),
+              let start = profile.range(of: Data("<?xml".utf8)),
+              let end = profile.range(of: Data("</plist>".utf8), in: start.lowerBound..<profile.count)
+        else { return [] }
+        let xml = profile[start.lowerBound..<end.upperBound]
+        guard let plist = try? PropertyListSerialization.propertyList(from: xml, options: [], format: nil),
+              let root = plist as? [String: Any],
+              let entitlements = root["Entitlements"] as? [String: Any],
+              let groups = entitlements["com.apple.security.application-groups"] as? [String]
+        else { return [] }
+        return groups
+    }()
 
     /// Posted by the keyboard each time it reports Full Access (`recordFullAccess`).
     nonisolated static let fullAccessDarwinNotification = "anomaly.hex.mobile.keyboard.fullAccess"

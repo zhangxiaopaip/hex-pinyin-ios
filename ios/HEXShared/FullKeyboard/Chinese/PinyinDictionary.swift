@@ -1,23 +1,12 @@
 import Foundation
 
-/// Reads the little-endian u32 the index stores at `offset`.
-private func hexU32(_ bytes: UnsafeRawBufferPointer, _ offset: Int) -> UInt32 {
-    guard offset >= 0, offset + 4 <= bytes.count else { return 0 }
-    return UInt32(bytes[offset])
-        | UInt32(bytes[offset + 1]) << 8
-        | UInt32(bytes[offset + 2]) << 16
-        | UInt32(bytes[offset + 3]) << 24
-}
-
 /// The Chinese keyboard's words, built from 万象拼音 (a Rime schema,
 /// https://github.com/amzxyz/rime-wanxiang) into `Wanxiang.pinyin` by
 /// `ios/scripts/build-wanxiang-dictionary.py`.
 ///
-/// The file is memory-mapped and decoded one pinyin at a time: a 400,000-word dictionary
-/// costs a mapped file and the few pages it reads, not tens of megabytes of Swift strings —
-/// which is what a keyboard extension's memory limit makes a difference about. A lookup is a
-/// binary search inside the first letter's bucket, so typing stays cheap however large the
-/// dictionary is.
+/// The file is memory-mapped and decoded one pinyin at a time (`PinyinIndex`): a 400,000-word
+/// dictionary costs a mapped file and the few pages it reads, not tens of megabytes of Swift
+/// strings — which is what a keyboard extension's memory limit makes a difference about.
 ///
 /// A candidate's score is a unigram model over words, as Rime's is: the sum of the log shares
 /// of the corpus, so a word beats the characters it is made of ("你好" over "你" and "好") and
@@ -48,12 +37,7 @@ nonisolated final class PinyinDictionary: @unchecked Sendable {
     /// Cached lookups: typing and deleting revisit the same keys constantly.
     private static let cacheLimit = 512
 
-    private let mapping: UnsafeRawBufferPointer?
-    private let mapSize: Int
-    private let fullTableAt: Int
-    private let abbrevTableAt: Int
-    /// The words a half-typed syllable may become. 0 in a version 1 file, which had none.
-    private let prefixTableAt: Int
+    private let index: PinyinIndex
     private let logTotal: Double
 
     private let lock = NSLock()
@@ -76,90 +60,52 @@ nonisolated final class PinyinDictionary: @unchecked Sendable {
         for url in candidates {
             if let dictionary = PinyinDictionary(fileURL: url) { return dictionary }
         }
+        // A sideloading tool that rewrote the bundle (a flattened extension, resources moved
+        // into a folder of its own) still leaves the file inside it somewhere: look, before
+        // giving up on Chinese altogether.
+        if let found = findInBundle("Wanxiang.pinyin"),
+           let dictionary = PinyinDictionary(fileURL: found) {
+            return dictionary
+        }
         // No dictionary in the bundle: the keys keep the pinyin as typed and offer no word,
         // which is a visible failure rather than a silent wrong one.
         return PinyinDictionary(empty: ())
     }
 
-    /// Maps the file read-only: pages arrive as they are read, and the mapping lives as long
-    /// as the keyboard process does.
+    /// A file by name anywhere in this bundle, a shallow walk: the two lookups above know
+    /// where the build puts it, and this is only for an install that moved it.
+    private static func findInBundle(_ name: String) -> URL? {
+        guard let walk = FileManager.default.enumerator(
+            at: Bundle.main.bundleURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles],
+            errorHandler: nil
+        ) else { return nil }
+        var seen = 0
+        for case let url as URL in walk {
+            seen += 1
+            if seen > 500 { break }
+            if url.lastPathComponent == name { return url }
+        }
+        return nil
+    }
+
     private init?(fileURL: URL) {
-        let descriptor = open(fileURL.path, O_RDONLY)
-        guard descriptor >= 0 else { return nil }
-        let size = lseek(descriptor, 0, SEEK_END)
-        guard size > 64 else { close(descriptor); return nil }
-        guard let pointer = mmap(nil, Int(size), PROT_READ, MAP_PRIVATE, descriptor, 0),
-              pointer != MAP_FAILED else {
-            close(descriptor)
-            return nil
-        }
-        close(descriptor)
-        let bytes = UnsafeRawBufferPointer(start: pointer, count: Int(size))
-        guard bytes.count > 32,
-              bytes[0] == 0x48, bytes[1] == 0x58, bytes[2] == 0x57, bytes[3] == 0x58 else {
-            munmap(pointer, Int(size))
-            return nil
-        }
-        self.mapping = bytes
-        self.mapSize = Int(size)
-        self.fullTableAt = Int(hexU32(bytes, 6))
-        self.abbrevTableAt = Int(hexU32(bytes, 10))
-        // Version 2 added the half-syllable table at the header's end.
-        self.prefixTableAt = bytes.count > 26 ? Int(hexU32(bytes, 18)) : 0
-        self.logTotal = log(max(Double(hexU32(bytes, 14)), 2))
+        guard let index = PinyinIndex(fileURL: fileURL) else { return nil }
+        self.index = index
+        self.logTotal = log(max(Double(index.totalWeight), 2))
     }
 
     private init(empty: ()) {
-        self.mapping = nil
-        self.mapSize = 0
-        self.fullTableAt = 0
-        self.abbrevTableAt = 0
-        self.prefixTableAt = 0
+        self.index = PinyinIndex(empty: ())
         self.logTotal = 1
     }
 
-    deinit {
-        guard let base = mapping?.baseAddress, mapSize > 0 else { return }
-        munmap(UnsafeMutableRawPointer(mutating: base), mapSize)
-    }
+    /// Whether the dictionary's file is mapped: false is a bundle that lost it, where the keys
+    /// keep the pinyin as typed and the bar says so rather than showing nothing.
+    var isLoaded: Bool { index.isLoaded }
 
-    // MARK: - Reading the index
-
-    /// Where a first letter's bucket starts, and how many keys it holds.
-    private func bucket(at table: Int, letter: UInt8) -> (start: Int, count: Int)? {
-        guard let mapping, letter >= 97, letter <= 122 else { return nil }
-        let entry = table + Int(letter - 97) * 8
-        guard entry + 8 <= mapping.count else { return nil }
-        let count = Int(hexU32(mapping, entry + 4))
-        guard count > 0 else { return nil }
-        return (Int(hexU32(mapping, entry)), count)
-    }
-
-    /// A record's offset for a bucket index.
-    private func record(_ index: Int, in bucket: (start: Int, count: Int)) -> Int? {
-        guard let mapping else { return nil }
-        let at = bucket.start + 4 + index * 4
-        guard at + 4 <= mapping.count else { return nil }
-        let offset = Int(hexU32(mapping, at))
-        guard offset > 0, bucket.start + offset < mapping.count else { return nil }
-        return bucket.start + offset
-    }
-
-    /// How a record's key orders against `wanted`: -1 before, 0 equal, 1 after.
-    private func order(of record: Int, against wanted: [UInt8]) -> Int? {
-        guard let mapping, record >= 0, record < mapping.count else { return nil }
-        let length = Int(mapping[record])
-        let start = record + 1
-        guard start + length <= mapping.count else { return nil }
-        var index = 0
-        while index < length && index < wanted.count {
-            let left = mapping[start + index]
-            if left != wanted[index] { return left < wanted[index] ? -1 : 1 }
-            index += 1
-        }
-        if length == wanted.count { return 0 }
-        return length < wanted.count ? -1 : 1
-    }
+    // MARK: - Reading
 
     /// Every word a pinyin spells, the likeliest first.
     func words(for key: String) -> [Word] {
@@ -167,7 +113,7 @@ nonisolated final class PinyinDictionary: @unchecked Sendable {
         if let cached = cache[key] { lock.unlock(); return cached }
         lock.unlock()
 
-        let found = lookup(key, at: fullTableAt)
+        let found = index.entries(for: key).map { Word(text: $0.text, weight: Double($0.weight)) }
 
         lock.lock()
         if cache.count >= Self.cacheLimit { cache.removeAll(keepingCapacity: true) }
@@ -176,50 +122,20 @@ nonisolated final class PinyinDictionary: @unchecked Sendable {
         return found
     }
 
-    private func lookup(_ key: String, at table: Int) -> [Word] {
-        let wanted = Array(key.utf8)
-        guard let first = wanted.first, let bucket = bucket(at: table, letter: first) else { return [] }
-
-        var low = 0
-        var high = bucket.count - 1
-        while low <= high {
-            let middle = (low + high) / 2
-            guard let at = record(middle, in: bucket), let order = order(of: at, against: wanted) else { return [] }
-            if order == 0 { return words(at: at) }
-            if order < 0 { low = middle + 1 } else { high = middle - 1 }
-        }
-        return []
-    }
-
-    private func words(at record: Int) -> [Word] {
-        guard let mapping else { return [] }
-        var cursor = record
-        let keyLength = Int(mapping[cursor])
-        cursor += 1 + keyLength
-        guard cursor + 2 <= mapping.count else { return [] }
-        let count = Int(mapping[cursor]) | Int(mapping[cursor + 1]) << 8
-        cursor += 2
-        var out: [Word] = []
-        out.reserveCapacity(count)
-        for _ in 0..<count {
-            guard cursor < mapping.count else { break }
-            let length = Int(mapping[cursor])
-            cursor += 1
-            guard cursor + length + 4 <= mapping.count else { break }
-            let text = String(decoding: mapping[cursor..<(cursor + length)], as: UTF8.self)
-            cursor += length
-            let weight = Double(hexU32(mapping, cursor))
-            cursor += 4
-            out.append(Word(text: text, weight: weight))
-        }
-        return out
-    }
-
     /// The likeliest words whose pinyin starts with `prefix`, for a half-typed syllable
     /// ("w" -> 我, "sh" -> 是, "nih" -> 你好): a table of its own, so no scanning of keys.
     private func wordsStarting(with prefix: String, limit: Int) -> [Word] {
-        guard prefixTableAt > 0, prefix.count <= Self.maxPrefixLength else { return [] }
-        return Array(lookup(prefix, at: prefixTableAt).prefix(limit))
+        guard prefix.count <= Self.maxPrefixLength else { return [] }
+        return index.entries(for: prefix, in: .prefix).prefix(limit).map {
+            Word(text: $0.text, weight: Double($0.weight))
+        }
+    }
+
+    /// 简拼 initials ("nh" -> 你好): a table of its own, as Rime offers beside the full spelling.
+    private func abbrevWords(for key: String) -> [Word] {
+        index.entries(for: key, in: .abbrev).map {
+            Word(text: $0.text, weight: Double($0.weight))
+        }
     }
 
     // MARK: - Candidates
@@ -287,7 +203,7 @@ nonisolated final class PinyinDictionary: @unchecked Sendable {
         // 简拼: initials only ("nh", "zg"), which Rime offers beside the full spelling.
         let initials = String(decoding: letters, as: UTF8.self)
         if initials.count >= 2, initials.count <= 6 {
-            for word in lookup(initials, at: abbrevTableAt) {
+            for word in abbrevWords(for: initials) {
                 found.append(Path(score: word.logWeight - logTotal - Self.abbrevPenalty, text: word.text))
             }
         }

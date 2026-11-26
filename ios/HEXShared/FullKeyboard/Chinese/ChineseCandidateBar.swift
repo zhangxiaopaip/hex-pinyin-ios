@@ -79,7 +79,9 @@ final class ChineseCandidateBar: UIView {
     func show(buffer: String, words: [String], generation: Int) {
         if buffer != self.buffer {
             self.buffer = buffer
-            bufferLabel.text = buffer
+            bufferLabel.text = buffer.isEmpty
+                ? nil
+                : (PinyinDictionary.shared.isLoaded ? buffer : String(localized: "Dictionary missing"))
             bufferLabel.isHidden = buffer.isEmpty
             setNeedsLayout()
         }

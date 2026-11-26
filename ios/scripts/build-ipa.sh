@@ -31,6 +31,19 @@ command -v xcodebuild >/dev/null 2>&1 || {
   exit 1
 }
 
+# The Chinese keyboard's index is read by offset, so a wrong field there is silent: bare
+# letters, no candidates, nothing in the build complaining. Check the shipped file first.
+if command -v swiftc >/dev/null 2>&1; then
+  swiftc -swift-version 6 -parse-as-library \
+    HEXShared/FullKeyboard/Chinese/PinyinIndex.swift \
+    scripts/verify-pinyin-index.swift \
+    -o "$build/verify-pinyin-index"
+  "$build/verify-pinyin-index"
+else
+  echo "swiftc is missing: cannot verify Wanxiang.pinyin" >&2
+  exit 1
+fi
+
 # The cleanup tagger's Core ML model is kept out of git; the generated project needs it.
 sh scripts/fetch-cleanup-model.sh
 

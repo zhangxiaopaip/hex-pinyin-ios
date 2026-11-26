@@ -134,6 +134,9 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        // The keyboard may be used before Hex is ever opened: its stamp is what tells the app
+        // a shared group exists (`KeyboardBridge.resolvedAppGroup`), so write it here too.
+        KeyboardBridge.writeAppGroupProbe()
         reportFullAccess(force: true)
         // Before any typing log starts: the keyboard may update before Hex is opened.
         TypingLogSettings().turnOffOnce()
