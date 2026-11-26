@@ -142,9 +142,9 @@ final class ChineseCandidateBar: UIView {
             var used: CGFloat = 0
             var index = start
             while index < words.count {
-                let width = width(of: words[index], first: index == 0)
-                if used + width > available, index > start { break }
-                used += width
+                let slot = width(of: words[index], first: index == 0)
+                if used + slot > available, index > start { break }
+                used += slot
                 index += 1
             }
             guard index < words.count else { break }
@@ -244,10 +244,10 @@ final class ChineseCandidateBar: UIView {
         for (index, button) in slots.enumerated() where !button.isHidden {
             let wordIndex = pageRange.lowerBound + index
             guard words.indices.contains(wordIndex) else { continue }
-            let width = width(of: words[wordIndex], first: wordIndex == 0)
+            let slot = width(of: words[wordIndex], first: wordIndex == 0)
             let room = max(0, limit - x)
-            button.frame = CGRect(x: x, y: top + 0.5, width: min(width, room), height: max(0, rowHeight - 1))
-            x += width
+            button.frame = CGRect(x: x, y: top + 0.5, width: min(slot, room), height: max(0, rowHeight - 1))
+            x += slot
         }
         let trailing = bounds.width - Self.inset - Self.arrowCell
         previousButton.frame = CGRect(x: trailing, y: top, width: Self.arrowWidth, height: rowHeight)

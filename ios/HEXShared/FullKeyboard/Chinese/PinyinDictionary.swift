@@ -236,12 +236,12 @@ nonisolated final class PinyinDictionary: @unchecked Sendable {
         )
         let ranked = readings.map {
             Reading(text: $0.text, spelling: $0.spelling, score: $0.score + learned.boost(for: $0.text))
-        }.sorted { left, right in
+        }.sorted(by: { left, right in
             let leftIsCharacter = characters.contains(left.text)
             let rightIsCharacter = characters.contains(right.text)
             if leftIsCharacter != rightIsCharacter { return leftIsCharacter }
             return left.score > right.score
-        }
+        })
 
         var seen = Set<String>()
         var out: [Candidate] = []
@@ -274,7 +274,7 @@ nonisolated final class PinyinDictionary: @unchecked Sendable {
 
         for position in 0..<letters.count {
             guard !best[position].isEmpty else { continue }
-            let paths = best[position].sorted { $0.score > $1.score }.prefix(Self.beam)
+            let paths = best[position].sorted(by: { $0.score > $1.score }).prefix(Self.beam)
             let remaining = letters.count - position
             for path in paths {
                 for length in 1...min(Self.maxKeyLength, remaining) {
@@ -305,7 +305,7 @@ nonisolated final class PinyinDictionary: @unchecked Sendable {
             // A run's later letters only ever add to a path, so the likeliest few of each
             // position stand for the rest.
             for target in (position + 1)...letters.count where best[target].count > Self.beam * 8 {
-                best[target] = Array(best[target].sorted { $0.score > $1.score }.prefix(Self.beam))
+                best[target] = Array(best[target].sorted(by: { $0.score > $1.score }).prefix(Self.beam))
             }
         }
 
@@ -321,7 +321,7 @@ nonisolated final class PinyinDictionary: @unchecked Sendable {
             guard tail.count <= 6, tail.count >= 2 || !spellsTheRun else { continue }
             guard words(for: tail).isEmpty else { continue }
             for word in wordsStarting(with: tail, limit: Self.partials) {
-                for path in best[position].sorted { $0.score > $1.score }.prefix(Self.partials) {
+                for path in best[position].sorted(by: { $0.score > $1.score }).prefix(Self.partials) {
                     found.append(
                         Path(score: path.score + word.logWeight - logTotal - Self.partialPenalty,
                              text: path.text + word.text,
@@ -344,7 +344,7 @@ nonisolated final class PinyinDictionary: @unchecked Sendable {
         }
 
         return found
-            .sorted { $0.score > $1.score }
+            .sorted(by: { $0.score > $1.score })
             .prefix(Self.readingLimit)
             .map { Reading(text: $0.text, spelling: $0.spelling, score: $0.score) }
     }
