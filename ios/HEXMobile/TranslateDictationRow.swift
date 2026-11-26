@@ -54,7 +54,11 @@ struct TranslateDictationRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Toggle(isOn: Binding(get: { enabled }, set: turn)) {
+            // The switch writes itself, and the change is what turns translation on: passing
+            // get/set closures to Binding here made Swift 6.2's IRGen abort emitting their
+            // @isolated(any) thunk ("report_at_maximum_capacity" in SyncCallEmission::setArgs),
+            // which no build setting talks it out of.
+            Toggle(isOn: $enabled) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Translate what I say")
                         .font(.system(size: 15, weight: .regular))
@@ -65,6 +69,9 @@ struct TranslateDictationRow: View {
                 }
             }
             .tint(HexTheme.success)
+            .onChange(of: enabled) { _, on in
+                turn(on)
+            }
 
             if enabled {
                 HStack {
@@ -167,9 +174,11 @@ struct TranslateDictationRow: View {
 
     /// The switch, turned by the person: on, it asks Apple for the pair's packs.
     private func turn(_ on: Bool) {
-        enabled = on
         let settings = DictationTranslationSettings()
-        if settings.isEnabled != on { settings.isEnabled = on }
+        // The keyboard writes this switch too, and reload() passes that on: only a value that
+        // differs from the stored one is the person's turn.
+        guard settings.isEnabled != on else { return }
+        settings.isEnabled = on
         if on { Task { await check(personActed: true) } }
     }
 
