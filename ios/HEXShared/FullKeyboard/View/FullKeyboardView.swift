@@ -498,11 +498,21 @@ final class FullKeyboardView: UIView {
 
     private func syncLanguage() {
         let settings = languageSettings
+        // With no list of its own, the keyboard stands in the pair Chinese needs; this iPhone
+        // decides which of the two opens: its own keyboard list and language say 简体中文 on a
+        // Chinese phone even where the region is not, and English everywhere else.
+        let chosen = settings.hasStoredKeyboardLanguages
+            ? settings.keyboardLanguages
+            : Self.preferredOrder(
+                of: settings.keyboardLanguages,
+                inputModes: inputModeLanguages,
+                preferred: preferredLanguages
+            )
         let list = if let languageOverride {
             KeyboardLanguageList(languages: [languageOverride], current: languageOverride)
         } else {
             KeyboardLanguageList.resolve(
-                chosen: settings.keyboardLanguages,
+                chosen: chosen,
                 stored: switchedLanguage ?? settings.currentKeyboardLanguage,
                 automatic: KeyboardLanguage.automatic(
                     dictationLanguage: settings.effectiveDictationLanguage,
@@ -533,6 +543,23 @@ final class FullKeyboardView: UIView {
         setNeedsLayout()
     }
 
+    /// The fallback pair, the language this iPhone types in first: its own keyboard list, then
+    /// its preferred language. A Chinese phone opens on 简体中文 with no setting to make first;
+    /// every other one keeps the order `LanguageSettings.defaultPair` gave it.
+    private static func preferredOrder(
+        of languages: [KeyboardLanguage],
+        inputModes: [String],
+        preferred: [String]
+    ) -> [KeyboardLanguage] {
+        let hint = KeyboardLanguage.automatic(
+            dictationLanguage: nil,
+            inputModes: inputModes,
+            preferredLanguages: preferred
+        )
+        guard languages.contains(hint), languages.first != hint else { return languages }
+        return [hint] + languages.filter { $0 != hint }
+    }
+
     /// A swipe along the space bar: the next or previous language (its letters, accents and
     /// autocorrect), kept for next time. Dictation on Automatic follows it
     /// (`LanguageSettings.keyboardDictationLanguage`); with Switch dictation too, a dictation
@@ -542,6 +569,12 @@ final class FullKeyboardView: UIView {
         let next = languages.switched(by: step)
         typingLog?.ui("keyboard_language", [TypingLogField("language", .string(next.rawValue))])
         switchedLanguage = next
+        // A swipe is a choice: once the typist has made one, the pair the keyboard was standing
+        // in for is theirs, written down, and the language they land on reopens next time
+        // (`currentKeyboardLanguage` has a list to be remembered against).
+        if !languageSettings.hasStoredKeyboardLanguages {
+            languageSettings.keyboardLanguages = languages.languages
+        }
         languageSettings.currentKeyboardLanguage = next
         selectionFeedback()
         syncLanguage()
@@ -973,6 +1006,7 @@ final class FullKeyboardView: UIView {
         }
         chineseBar.isHidden = !composingChinese || selection != nil || emojiPanel != nil || showsRecording
         chineseBar.show(
+            buffer: composingChinese ? engine.chinese.buffer : "",
             words: composingChinese ? chineseWords : [],
             generation: engine.chinese.generation
         )

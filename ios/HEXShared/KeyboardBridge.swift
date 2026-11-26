@@ -499,8 +499,24 @@ struct KeyboardBridge {
     /// certificate cannot carry) — iOS still hands back a defaults object. It is a private,
     /// empty domain per process, so the app and the keyboard each read nothing of the other's
     /// and every setting silently does nothing.
+    ///
+    /// The container is the surest sign, but a re-sign that keeps the entitlement can leave it
+    /// uncreated, and then only cfprefsd still shares the suite. So the app stamps a probe into
+    /// it on launch (`writeAppGroupProbe`): a keyboard that reads the stamp back is sharing the
+    /// domain, container or no container, and settings sync again.
+    nonisolated static let appGroupProbe = "settings.appGroupProbe"
+
     nonisolated static var appGroupAvailable: Bool {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup) != nil
+        if FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup) != nil {
+            return true
+        }
+        return UserDefaults(suiteName: appGroup)?.string(forKey: appGroupProbe) != nil
+    }
+
+    /// The app's side of `appGroupAvailable`: writes the stamp the keyboard looks for, straight
+    /// into the suite so a stripped signature writes into a domain no one else can see.
+    nonisolated static func writeAppGroupProbe() {
+        UserDefaults(suiteName: appGroup)?.set(Bundle.main.bundleIdentifier ?? "hex", forKey: appGroupProbe)
     }
 
     /// Where settings live: the App Group when the install has one, else this process's own

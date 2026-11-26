@@ -116,11 +116,11 @@ nonisolated struct LanguageSettings {
     }
 
     /// Settings › Keyboard › Languages: the full keyboard's languages in order, the space bar
-    /// switching between them; empty is Automatic (the dictation language's layout). Until
-    /// it is first written, the one layout chosen before (`settings.keyboardLayout`).
+    /// switching between them. Until the app writes a list — a fresh install, or a re-sign that
+    /// dropped the App Group's contents (`KeyboardBridge.storage`) — it is `defaultPair`.
     var keyboardLanguages: [KeyboardLanguage] {
         get {
-            guard let defaults else { return [.english, .chinese] }
+            guard let defaults else { return Self.defaultPair }
             let stored = defaults.stringArray(forKey: Key.keyboardLanguages)
                 ?? defaults.string(forKey: Key.keyboardLayout).map { [$0] }
                 ?? []
@@ -130,19 +130,12 @@ nonisolated struct LanguageSettings {
                 .filter { seen.insert($0).inserted }
                 // 한국어 is ignored while its experiment is off, even if it was stored before.
                 .filter { $0 != .korean || koreanEnabled }
-            // An install whose signature dropped the App Group (a free Apple ID's build, or a
-            // sideloading tool's re-sign: see `KeyboardBridge.storage`) can never be told what
-            // Hex's app chose — nothing of its own is empty, it is simply unset. Without a
-            // default it would type English forever with no way to reach Chinese, so it gets
-            // the two languages the Chinese keyboard needs, English first.
-            if chosen.isEmpty, !KeyboardBridge.appGroupAvailable {
-                // English first on an English iPhone, Chinese first on a Chinese one: the
-                // space bar still switches, but the language the typist expects is already up.
-                let preferred = Locale.preferredLanguages.first
-                    .flatMap { Locale(identifier: $0).language.languageCode?.identifier }
-                return preferred == "zh" ? [.chinese, .english] : [.english, .chinese]
-            }
-            return chosen
+            // No list at all is not "English": a keyboard with nothing stored used to fall
+            // through to Automatic, which follows the dictation language — English (US) on an
+            // iPhone that had never dictated anything — and typed bare letters with no way to
+            // reach 简体中文 short of a hidden space-bar swipe. Both cases, an App Group the
+            // signature kept and one it dropped, get the pair Chinese needs instead.
+            return chosen.isEmpty ? Self.defaultPair : chosen
         }
         nonmutating set {
             var seen = Set<KeyboardLanguage>()
@@ -150,6 +143,36 @@ nonisolated struct LanguageSettings {
             defaults?.set(languages.map(\.rawValue), forKey: Key.keyboardLanguages)
             defaults?.set(languages.first?.rawValue, forKey: Key.keyboardLayout)
         }
+    }
+
+    /// Whether a list of languages was ever written: false while `defaultPair` is standing in
+    /// for one, true once the app chose, or a space-bar swipe wrote the pair down.
+    var hasStoredKeyboardLanguages: Bool {
+        guard let stored = defaults?.stringArray(forKey: Key.keyboardLanguages) else {
+            return defaults?.string(forKey: Key.keyboardLayout) != nil
+        }
+        return !stored.isEmpty
+    }
+
+    /// Writes `defaultPair` when nothing has chosen a list yet, so the app's Settings shows the
+    /// languages the keyboard types on instead of an empty Automatic the keyboard has to guess.
+    static func seedKeyboardLanguagesIfNeeded() {
+        guard let defaults = KeyboardBridge.storage,
+              defaults.object(forKey: Key.keyboardLanguages) == nil,
+              defaults.string(forKey: Key.keyboardLayout) == nil else { return }
+        let pair = Self.defaultPair
+        defaults.set(pair.map(\.rawValue), forKey: Key.keyboardLanguages)
+        defaults.set(pair.first?.rawValue, forKey: Key.keyboardLayout)
+        defaults.set(pair.first?.rawValue, forKey: Key.currentKeyboardLanguage)
+    }
+
+    /// What a keyboard with no language list of its own types on: 简体中文 and English, this
+    /// iPhone's own language first, so the language the typist expects is already up and the
+    /// space bar still switches to the other. Never one language alone — a lone English
+    /// keyboard has nothing to swipe to, which is how a pinyin typist ends up with bare letters.
+    static var defaultPair: [KeyboardLanguage] {
+        let speaksChinese = Locale.preferredLanguages.contains { $0.hasPrefix("zh") }
+        return speaksChinese ? [.chinese, .english] : [.english, .chinese]
     }
 
     /// Settings › Keyboard › Languages › Layout: how each language arranges its letters
@@ -171,10 +194,16 @@ nonisolated struct LanguageSettings {
         defaults?.dictionary(forKey: Key.letterLayouts) as? [String: String] ?? [:]
     }
 
-    /// The language the space bar last switched to, so the keyboard comes back in it.
+    /// The language the space bar last switched to, so the keyboard comes back in it. Meaningful
+    /// only for a list the typist chose: while `defaultPair` stands in for a list nothing wrote,
+    /// a leftover from an older install would reopen the keyboard in English, which is the one
+    /// language a pinyin typist cannot get out of.
     var currentKeyboardLanguage: KeyboardLanguage? {
         get {
-            guard let language = defaults?.string(forKey: Key.currentKeyboardLanguage)
+            guard let defaults else { return nil }
+            guard let storedList = defaults.stringArray(forKey: Key.keyboardLanguages),
+                  !storedList.isEmpty else { return nil }
+            guard let language = defaults.string(forKey: Key.currentKeyboardLanguage)
                 .flatMap(KeyboardLanguage.init(rawValue:)) else { return nil }
             let koreanEnabled = KoreanKeyboardExperiment.isEnabled(in: defaults)
             return language == .korean && !koreanEnabled ? nil : language

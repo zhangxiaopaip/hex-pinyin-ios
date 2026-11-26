@@ -23,11 +23,23 @@ final class ChineseCandidateBar: UIView {
     private var slots: [UIButton] = []
     private let previousButton = UIButton(type: .system)
     private let nextButton = UIButton(type: .system)
+    /// The pinyin the run has typed, at the bar's leading edge: the field shows the letters
+    /// too, but here they read as what is being composed rather than as text already typed.
+    private let bufferLabel = UILabel()
+    private var buffer = ""
+    /// The page size the words were last split for.
+    private var pageSize = 0
     private let separatorLines = (0..<10).map { _ in UIView() }
+
+    /// How much of the bar the pinyin keeps, so a long run never squeezes the words out.
+    private var bufferWidth: CGFloat {
+        guard !buffer.isEmpty else { return 0 }
+        return min(104, max(56, bounds.width * 0.2))
+    }
 
     /// How many words fit: about 40 pt a word, within what a thumb can hit.
     private var perPage: Int {
-        let width = max(bounds.width, 200)
+        let width = max(bounds.width - bufferWidth, 200)
         return min(Self.maxSlots, max(5, Int(width / 40)))
     }
 
@@ -37,6 +49,10 @@ final class ChineseCandidateBar: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .clear
+        bufferLabel.font = .systemFont(ofSize: 16)
+        bufferLabel.lineBreakMode = .byTruncatingHead
+        bufferLabel.isUserInteractionEnabled = false
+        addSubview(bufferLabel)
         for line in separatorLines {
             line.isUserInteractionEnabled = false
             addSubview(line)
@@ -59,8 +75,14 @@ final class ChineseCandidateBar: UIView {
         button.isHidden = true
     }
 
-    /// The run's words, and whether the run is new (the bar then shows its first page).
-    func show(words: [String], generation: Int) {
+    /// The run's pinyin, its words, and whether the run is new (the bar then shows its first page).
+    func show(buffer: String, words: [String], generation: Int) {
+        if buffer != self.buffer {
+            self.buffer = buffer
+            bufferLabel.text = buffer
+            bufferLabel.isHidden = buffer.isEmpty
+            setNeedsLayout()
+        }
         if generation != self.generation {
             self.generation = generation
             page = 0
@@ -139,10 +161,20 @@ final class ChineseCandidateBar: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        // The bar is first shown before it is laid out: the page it can hold follows its width
+        // (and the pinyin's), so the words are split again once that is known.
+        if pageSize != perPage {
+            pageSize = perPage
+            rebuild()
+            return
+        }
         let height = bounds.height
         let arrow: CGFloat = 18
         let inset: CGFloat = 6
         var x = inset
+        let bufferWidth = self.bufferWidth
+        bufferLabel.frame = CGRect(x: inset, y: 0, width: max(0, bufferWidth - 8), height: height)
+        x += bufferWidth
         if !previousButton.isHidden {
             previousButton.frame = CGRect(x: x, y: 0, width: arrow, height: height)
             x += arrow
@@ -168,6 +200,7 @@ final class ChineseCandidateBar: UIView {
     }
 
     private func applyPalette() {
+        bufferLabel.textColor = palette.stripText
         for button in slots {
             button.setTitleColor(palette.textBase, for: .normal)
             button.setTitleColor(palette.stripText, for: .highlighted)

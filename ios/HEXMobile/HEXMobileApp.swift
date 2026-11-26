@@ -23,6 +23,10 @@ struct HEXMobileApp: App {
         KeyboardParakeetSettings().applyLaunchArguments()
         KeyboardParakeetSettings().forgetUnavailableWithoutReason()
         SettingsSnapshotFixture.applyDefaults()
+        // Tells the keyboard whether the App Group is really shared (a re-signed build can keep
+        // the entitlement without its container), before anything writes a setting.
+        KeyboardBridge.writeAppGroupProbe()
+        LanguageSettings.seedKeyboardLanguagesIfNeeded()
         HexInbox.sweep()
     }
 
