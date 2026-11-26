@@ -52,11 +52,6 @@ pins=HEXMobile.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
 mkdir -p "$pins"
 cp Package.resolved "$pins/Package.resolved"
 
-# Swift 6.2's IRGen dies emitting a reabstraction thunk inside FluidAudio 0.15.5 (a
-# @Sendable conversion of an actor-isolated closure). The package and Hex both compile in
-# Swift 5's language mode, which emits no such thunk, and the binary is the same either way.
-SWIFT_LANGUAGE_MODE=${SWIFT_LANGUAGE_MODE:-5}
-
 # Resolving first keeps a mistyped pin out of a twenty-minute archive.
 xcodebuild -resolvePackageDependencies -project HEXMobile.xcodeproj -scheme HEXMobile \
   -disableAutomaticPackageResolution -onlyUsePackageVersionsFromResolvedFile \
@@ -69,7 +64,7 @@ if [ "${UNSIGNED:-1}" = 1 ]; then
     -configuration Release -destination 'generic/platform=iOS' \
     -archivePath "$archive" \
     -skipPackagePluginValidation -skipMacroValidation \
-    SWIFT_VERSION="$SWIFT_LANGUAGE_MODE" \
+    APPLICATION_EXTENSION_API_ONLY=NO \
     CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
 
   app="$archive/Products/Applications/HEX.app"
@@ -88,7 +83,6 @@ else
     -configuration Release -destination 'generic/platform=iOS' \
     -archivePath "$archive" \
     -skipPackagePluginValidation -skipMacroValidation \
-    SWIFT_VERSION="$SWIFT_LANGUAGE_MODE" \
     -allowProvisioningUpdates
 
   xcodebuild -exportArchive -archivePath "$archive" \
