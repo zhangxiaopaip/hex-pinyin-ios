@@ -1,0 +1,10 @@
+# The build runs on macOS; a shell script checked out with CRLF dies on its first line.
+* text=auto eol=lf
+*.sh text eol=lf
+*.tsv text eol=lf
+*.png binary
+*.jpg binary
+*.wav binary
+*.mlmodelc binary
+*.mlpackage binary
+*.appex binary
