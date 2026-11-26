@@ -55,9 +55,9 @@ let package = Package(
             ]
         ),
     ],
-    cxxLanguageStandard: .cxx17,
-    // Vendored for Hex: Swift 6.2's IRGen aborts emitting a witness thunk for this
-    // module ("report_at_maximum_capacity" in SyncCallEmission::setArgs), and Swift 5's
-    // language mode emits a thunk of a different shape that it survives.
-    swiftLanguageModes: [.v5]
+    // Vendored for Hex: Swift 6.2's IRGen aborts emitting a witness thunk for this module
+    // ("report_at_maximum_capacity" in SyncCallEmission::setArgs), and Swift 5's language
+    // mode emits a thunk of a different shape that it survives.
+    swiftLanguageModes: [.v5],
+    cxxLanguageStandard: .cxx17
 )
