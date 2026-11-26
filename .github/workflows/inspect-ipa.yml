@@ -1,7 +1,7 @@
 name: inspect-ipa
 
 # One-off diagnostic: unpack the built IPA and report what actually shipped
-# (does HEXKeyboard.appex contain the pinyin dictionary?).
+# (does HEXKeyboard.appex contain the pinyin dictionary, and how big is it?).
 on:
   workflow_dispatch:
     inputs:
@@ -26,17 +26,10 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: out
 
-      - name: List artifact and IPA contents
+      - name: Report the pinyin dictionary
         run: |
           set -euo pipefail
-          echo "== artifact files =="
-          find out -type f -printf '%p  %s\n'
-          echo
           for ipa in $(find out -name '*.ipa'); do
             echo "== $ipa =="
-            unzip -l "$ipa" | head -40
-            echo "-- appex resources --"
-            unzip -l "$ipa" | grep -i -E "appex|tsv|Pinyin|bundle" | head -40
-            echo "-- any tsv anywhere --"
-            unzip -l "$ipa" | grep -i "\.tsv" | head -40 || echo "NO TSV FOUND"
+            unzip -l "$ipa" | grep -i -E "Wanxiang|HEXKeyboard.appex/$" || true
           done
