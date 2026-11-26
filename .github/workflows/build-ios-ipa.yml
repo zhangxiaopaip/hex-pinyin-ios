@@ -31,15 +31,21 @@ jobs:
       - uses: actions/checkout@v4
 
       # The app links FoundationModels and compiles Icon Composer's .icon, both of which are
-      # Xcode 26's; an older Xcode fails here rather than producing a quietly wrong app.
-      - name: Use Xcode 26
+      # Xcode 26's; an older Xcode fails here rather than producing a quietly wrong app. The
+      # newest is also the one least likely to crash in IRGen, which Xcode 26.0.1's 6.2 does
+      # while emitting a reabstraction thunk from FluidAudio.
+      - name: Use the newest Xcode
         run: |
-          for candidate in /Applications/Xcode_26*.app /Applications/Xcode.app; do
-            if [ -d "$candidate" ]; then
-              sudo xcode-select -s "$candidate/Contents/Developer"
-              break
-            fi
-          done
+          ls -d /Applications/Xcode*.app || true
+          chosen=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V 2>/dev/null | tail -1)
+          # sort -V is BSD's too new to count on; the plain order is the fallback.
+          [ -n "$chosen" ] || chosen=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort | tail -1)
+          if [ -z "$chosen" ]; then
+            echo "No Xcode on this runner" >&2
+            exit 1
+          fi
+          sudo xcode-select -s "$chosen/Contents/Developer"
+          echo "Using $chosen"
           xcodebuild -version
           major=$(xcodebuild -version | head -1 | sed -E 's/^Xcode ([0-9]+).*/\1/')
           if [ "$major" -lt 26 ]; then
