@@ -56,8 +56,12 @@ nonisolated enum SpokenCleanupRules {
     /// nothing goes or the language has no rules.
     static func clean(_ text: String, language: String?) -> String {
         // Chinese and Japanese write without spaces, so the word lists below never match a
-        // whole cell: they get their own character-wise removal.
-        if let cleaned = UnspacedFillers.clean(text, language: language) { return cleaned }
+        // whole cell: they get their own character-wise removal. Chinese then loses the
+        // phrases it thinks aloud with ("那个，", "就是说，"), which need a heading to be
+        // told from the same words said for what they mean.
+        if let cleaned = UnspacedFillers.clean(text, language: language) {
+            return ChineseDictation.removingTics(cleaned, language: language)
+        }
         guard let rules = rules(for: language) else { return text }
         let words = CleanupTagger.words(in: text)
         var cleaned = removingFillers(words, rules: rules, language: language)

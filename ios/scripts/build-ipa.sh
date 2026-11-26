@@ -43,6 +43,20 @@ if command -v swiftc >/dev/null 2>&1; then
     scripts/verify-pinyin-index.swift \
     -o "$build/verify-pinyin-index"
   "$build/verify-pinyin-index"
+
+  # Chinese dictation is written without spaces, so a rule that reads words finds nothing to
+  # do and the line comes back as heard: 「嗯，那个，」 with its filler, 「，，」 with its doubled
+  # comma, and nothing complaining. These run the real formatter over dictated lines.
+  swiftc -swift-version 6 -parse-as-library \
+    HEXShared/Formatting/ChineseDictation.swift \
+    HEXShared/Formatting/TranscriptFormatter.swift \
+    HEXShared/Formatting/SpokenLists.swift \
+    HEXShared/Formatting/SpokenPunctuation.swift \
+    HEXShared/Formatting/UnspacedFillers.swift \
+    scripts/verify-chinese-stubs.swift \
+    scripts/verify-chinese.swift \
+    -o "$build/verify-chinese"
+  "$build/verify-chinese"
 else
   echo "swiftc is missing: cannot verify Wanxiang.pinyin" >&2
   exit 1

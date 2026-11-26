@@ -188,6 +188,32 @@ struct DictationSettingsPage: View {
                 }
             }
 
+            // Chinese is dictated with Apple's speech recognition — Parakeet's 25 languages are
+            // European and hold none — so its tidy-up is Hex's own (`ChineseDictation`).
+            SettingsSectionHeader(title: "Chinese")
+
+            SettingsCard {
+                SettingsToggleRow(
+                    title: String(localized: "Tidy Chinese"),
+                    detail: String(localized: "「，」 for 「,」, no gaps between characters, a word said twice once"),
+                    isOn: toggleBinding(
+                        { ChineseDictationSettings().isTidy },
+                        { ChineseDictationSettings().isTidy = $0 }
+                    )
+                )
+
+                SettingsDivider()
+
+                SettingsToggleRow(
+                    title: String(localized: "Drop verbal tics"),
+                    detail: String(localized: "「那个，」「就是说，」「你知道吗，」 and the like"),
+                    isOn: toggleBinding(
+                        { ChineseDictationSettings().dropsTics },
+                        { ChineseDictationSettings().dropsTics = $0 }
+                    )
+                )
+            }
+
             // While the keyboard records by itself (iOS 26 and later): one 3-way choice for live
             // words instead of two interacting switches.
             if #available(iOS 26.0, *) {

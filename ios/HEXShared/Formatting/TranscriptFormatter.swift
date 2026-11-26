@@ -76,7 +76,14 @@ nonisolated enum TranscriptFormatter {
         let unspaced = writesWithoutSpaces(language)
         func cleaned() -> String {
             let stripped = stripStandaloneFillers(in: trimmed, fillers: fillers)
-            return spoken(unspaced ? closingUnspacedGaps(in: stripped) : stripped, lists, punctuation, language)
+            let spaced = unspaced ? closingUnspacedGaps(in: stripped) : stripped
+            // Chinese is written as Chinese: full-width marks, no gap between two characters,
+            // a repeated word once (`ChineseDictation`, after the spoken marks it may hold).
+            return ChineseDictation.polish(
+                spoken(spaced, lists, punctuation, language),
+                language: language,
+                punctuation: punctuation
+            )
         }
 
         switch style {
@@ -321,6 +328,8 @@ nonisolated enum TranscriptFormatter {
     private static func endingSentence(_ line: String, unspaced: Bool = false) -> String {
         guard let last = line.last, !sentenceClosers.contains(last) else { return line }
         if line.contains("@"), !line.contains(where: \.isWhitespace) { return line }
+        // A Chinese line that ends in 吗 asks, and takes "？" ("好看吗" said, "好看吗？" written).
+        if unspaced, last == "吗" { return line + "？" }
         let ideographic = usesIdeographicFullStop(last) || (unspaced && line.contains(where: usesIdeographicFullStop))
         return line + (ideographic ? "。" : ".")
     }

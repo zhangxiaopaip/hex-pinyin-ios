@@ -2479,4 +2479,93 @@ final class SpokenPunctuationTests: XCTestCase {
         settings.isEnabled = false
         XCTAssertFalse(DictationPunctuationSettings(defaults: defaults).isEnabled)
     }
+
+
+/// Chinese dictation: the marks it is written with, the words said twice, and the phrases a
+/// speaker thinks aloud with (`ChineseDictation`).
+final class ChineseDictationTests: XCTestCase {
+    private func settings(tidy: Bool = true, tics: Bool = true) -> ChineseDictationSettings {
+        let defaults = UserDefaults(suiteName: "hex.tests.\(UUID().uuidString)")!
+        let settings = ChineseDictationSettings(defaults: defaults)
+        settings.isTidy = tidy
+        settings.dropsTics = tics
+        return settings
+    }
+
+    func testASoundAndThePhrasesItLeadsIntoGo() {
+        XCTAssertEqual(
+            SpokenCleanupRules.clean("嗯，那个，我觉得这个方案可以", language: "zh-CN"),
+            "我觉得这个方案可以"
+        )
+        XCTAssertEqual(SpokenCleanupRules.clean("你知道吗，他昨天没来", language: "zh-CN"), "他昨天没来")
+        XCTAssertEqual(
+            SpokenCleanupRules.clean("然后就是，我们要注意安全", language: "zh-CN"),
+            "然后我们要注意安全",
+            "然后就是 keeps its 然后"
+        )
+    }
+
+    func testTheSameWordsSaidForTheirMeaningStay() {
+        XCTAssertEqual(
+            SpokenCleanupRules.clean("我喜欢那个，红色的包", language: "zh-CN"),
+            "我喜欢那个，红色的包",
+            "mid-sentence 那个 is a word"
+        )
+        XCTAssertEqual(SpokenCleanupRules.clean("额度不够了", language: "zh-CN"), "额度不够了")
+        XCTAssertEqual(SpokenCleanupRules.clean("好啊，走吧", language: "zh-CN"), "好啊，走吧")
+    }
+
+    func testTheSameWordsAreWrittenOnce() {
+        XCTAssertEqual(
+            TranscriptFormatter.format("我我我觉得不对", style: .polished, language: "zh-CN"),
+            "我觉得不对。"
+        )
+        XCTAssertEqual(
+            TranscriptFormatter.format("这个这个，我们明天再说", style: .polished, language: "zh-CN"),
+            "这个，我们明天再说。"
+        )
+        XCTAssertEqual(
+            TranscriptFormatter.format("一个一个来", style: .polished, language: "zh-CN"),
+            "一个一个来。",
+            "一个一个 counts, and stays"
+        )
+        XCTAssertEqual(
+            TranscriptFormatter.format("慢慢来吧", style: .polished, language: "zh-CN"),
+            "慢慢来吧。",
+            "慢慢 is a word"
+        )
+    }
+
+    func testTheMarksAreTheOnesChineseUses() {
+        XCTAssertEqual(
+            TranscriptFormatter.format("牛奶, 然后我们走", style: .polished, language: "zh-CN"),
+            "牛奶，然后我们走。"
+        )
+        XCTAssertEqual(
+            TranscriptFormatter.format("你看那个红色的，好看吗", style: .polished, language: "zh-CN"),
+            "你看那个红色的，好看吗？",
+            "吗 asks"
+        )
+        XCTAssertEqual(
+            TranscriptFormatter.format("第一点，逗号，第二点", style: .polished, language: "zh-CN", punctuation: true),
+            "第一点，第二点。",
+            "逗号 said by name"
+        )
+    }
+
+    func testTheSwitchesTurnItOff() {
+        let off = settings(tidy: false, tics: false)
+        XCTAssertEqual(ChineseDictation.removingTics("那个，我觉得可以", language: "zh-CN", settings: off), "那个，我觉得可以")
+        XCTAssertEqual(ChineseDictation.polish("牛奶, 然后我们走", language: "zh-CN", settings: off), "牛奶, 然后我们走")
+
+        let on = settings()
+        XCTAssertTrue(ChineseDictationSettings(defaults: UserDefaults(suiteName: "hex.tests.\(UUID().uuidString)")).isTidy)
+        XCTAssertTrue(ChineseDictationSettings(defaults: UserDefaults(suiteName: "hex.tests.\(UUID().uuidString)")).dropsTics)
+        XCTAssertEqual(ChineseDictation.removingTics("那个，我觉得可以", language: "zh-CN", settings: on), "我觉得可以")
+    }
+
+    func testAnotherLanguageKeepsItsOwnTics() {
+        XCTAssertEqual(ChineseDictation.removingTics("那个，我觉得", language: "yue", settings: settings()), "那个，我觉得")
+        XCTAssertEqual(ChineseDictation.polish("um, I think", language: "en-US", settings: settings()), "um, I think")
+    }
 }
