@@ -55,6 +55,9 @@ nonisolated enum SpokenCleanupRules {
     /// `text` with its fillers and spoken corrections removed, or `text` itself when
     /// nothing goes or the language has no rules.
     static func clean(_ text: String, language: String?) -> String {
+        // Chinese and Japanese write without spaces, so the word lists below never match a
+        // whole cell: they get their own character-wise removal.
+        if let cleaned = UnspacedFillers.clean(text, language: language) { return cleaned }
         guard let rules = rules(for: language) else { return text }
         let words = CleanupTagger.words(in: text)
         var cleaned = removingFillers(words, rules: rules, language: language)

@@ -326,7 +326,7 @@ nonisolated final class UserWords: @unchecked Sendable {
 
     private let lock = NSLock()
     private var counts: [String: Int]
-    private let defaults = UserDefaults(suiteName: "group.anomaly.hex.mobile") ?? .standard
+    private let defaults = KeyboardBridge.storage ?? .standard
     private static let key = "chinese.userWords"
 
     private init() {

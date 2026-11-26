@@ -146,7 +146,7 @@ actor OnDeviceSpeechTranscriber: LocalTranscribing {
     private var recognizer: SFSpeechRecognizer?
 
     private var languages: LanguageSettings {
-        LanguageSettings(defaults: UserDefaults(suiteName: suite))
+        LanguageSettings(defaults: suite == KeyboardBridge.appGroup ? KeyboardBridge.storage : UserDefaults(suiteName: suite))
     }
 
     var languageName: String {

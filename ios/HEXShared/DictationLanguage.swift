@@ -36,7 +36,7 @@ nonisolated struct LanguageSettings {
 
     private let defaults: UserDefaults?
 
-    init(defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup)) {
+    init(defaults: UserDefaults? = KeyboardBridge.storage) {
         self.defaults = defaults
     }
 
@@ -120,20 +120,25 @@ nonisolated struct LanguageSettings {
     /// it is first written, the one layout chosen before (`settings.keyboardLayout`).
     var keyboardLanguages: [KeyboardLanguage] {
         get {
-            // An install without the App Group (a free Apple ID's build, see build-ipa.sh) can
-            // never be told what Hex's app chose, and nothing it stores is ever read: without
-            // this it would type English forever with no way to reach Chinese. Such an install
-            // gets the two languages Hex's Chinese keyboard needs, English first.
             guard let defaults else { return [.english, .chinese] }
             let stored = defaults.stringArray(forKey: Key.keyboardLanguages)
                 ?? defaults.string(forKey: Key.keyboardLayout).map { [$0] }
                 ?? []
             var seen = Set<KeyboardLanguage>()
             let koreanEnabled = KoreanKeyboardExperiment.isEnabled(in: defaults)
-            return stored.compactMap(KeyboardLanguage.init(rawValue:))
+            let chosen = stored.compactMap(KeyboardLanguage.init(rawValue:))
                 .filter { seen.insert($0).inserted }
                 // 한국어 is ignored while its experiment is off, even if it was stored before.
                 .filter { $0 != .korean || koreanEnabled }
+            // An install whose signature dropped the App Group (a free Apple ID's build, or a
+            // sideloading tool's re-sign: see `KeyboardBridge.storage`) can never be told what
+            // Hex's app chose — nothing of its own is empty, it is simply unset. Without a
+            // default it would type English forever with no way to reach Chinese, so it gets
+            // the two languages the Chinese keyboard needs, English first.
+            if chosen.isEmpty, !KeyboardBridge.appGroupAvailable {
+                return [.english, .chinese]
+            }
+            return chosen
         }
         nonmutating set {
             var seen = Set<KeyboardLanguage>()

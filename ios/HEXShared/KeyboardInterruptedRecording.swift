@@ -31,19 +31,19 @@ nonisolated struct KeyboardInterruptedRecording: Codable, Equatable, Sendable {
     }
 
     /// The one recording left, if any: a newer one takes its place.
-    static func load(defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup)) -> Self? {
+    static func load(defaults: UserDefaults? = KeyboardBridge.storage) -> Self? {
         guard let data = defaults?.data(forKey: key) else { return nil }
         return try? JSONDecoder().decode(Self.self, from: data)
     }
 
-    func save(defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup)) {
+    func save(defaults: UserDefaults? = KeyboardBridge.storage) {
         if let data = try? JSONEncoder().encode(self) {
             defaults?.set(data, forKey: Self.key)
         }
     }
 
     /// Forgets `jobID`'s recording and deletes its file; another job's is left alone.
-    static func clear(jobID: String, defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup)) {
+    static func clear(jobID: String, defaults: UserDefaults? = KeyboardBridge.storage) {
         guard let record = load(defaults: defaults), record.jobID == jobID else { return }
         try? FileManager.default.removeItem(at: record.url)
         defaults?.removeObject(forKey: key)

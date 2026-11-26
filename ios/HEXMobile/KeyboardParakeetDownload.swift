@@ -29,7 +29,7 @@ final class SpeechModelDownloadNetwork {
     @ObservationIgnored private var observers: [@MainActor (Bool) -> Void] = []
 
     init(
-        defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup),
+        defaults: UserDefaults? = KeyboardBridge.storage,
         isUnmetered: Bool? = nil,
         watchesConnection: Bool = true
     ) {
@@ -227,7 +227,7 @@ final class KeyboardParakeetDownload {
     /// `--snap-state model-card-waiting|downloading|ready`: Home's card in each state on the
     /// simulator. The keyboard's limit is cleared, so nothing really downloads.
     func applyFixture(_ scene: String) {
-        let group = UserDefaults(suiteName: KeyboardBridge.appGroup)
+        let group = KeyboardBridge.storage
         for key in [KeyboardParakeetSettings.enabledKey, KeyboardParakeetSettings.keyboardLimitKey, SpeechModelHomeCard.dismissedKey] {
             group?.removeObject(forKey: key)
         }
@@ -527,11 +527,11 @@ struct SpeechModelHomeCard: View {
 
     static let dismissedKey = "home.speechModelCard.dismissed"
 
-    static func isDismissed(_ defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup)) -> Bool {
+    static func isDismissed(_ defaults: UserDefaults? = KeyboardBridge.storage) -> Bool {
         defaults?.bool(forKey: dismissedKey) ?? false
     }
 
-    static func dismiss(_ defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup)) {
+    static func dismiss(_ defaults: UserDefaults? = KeyboardBridge.storage) {
         defaults?.set(true, forKey: dismissedKey)
     }
 

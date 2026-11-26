@@ -12,7 +12,7 @@ nonisolated struct CustomVocabularySettings {
 
     private let defaults: UserDefaults?
 
-    init(defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup)) {
+    init(defaults: UserDefaults? = KeyboardBridge.storage) {
         self.defaults = defaults
     }
 

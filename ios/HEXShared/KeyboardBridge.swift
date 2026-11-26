@@ -492,6 +492,25 @@ nonisolated enum KeyboardFullAccess: Equatable, Sendable {
 @MainActor
 struct KeyboardBridge {
     nonisolated static let appGroup = "group.anomaly.hex.mobile"
+
+    /// Whether this install really has the App Group. Not the same as asking
+    /// `UserDefaults(suiteName:)` for nil: with the entitlement gone — a free Apple ID's build,
+    /// or anything a sideloading tool re-signed (they strip App Groups, which a free
+    /// certificate cannot carry) — iOS still hands back a defaults object. It is a private,
+    /// empty domain per process, so the app and the keyboard each read nothing of the other's
+    /// and every setting silently does nothing.
+    nonisolated static var appGroupAvailable: Bool {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup) != nil
+    }
+
+    /// Where settings live: the App Group when the install has one, else this process's own
+    /// defaults. The fallback keeps a stripped-signature keyboard usable on its own — its
+    /// language, its switches, its learned words — instead of falling back to English forever.
+    nonisolated static var storage: UserDefaults? {
+        if appGroupAvailable { return UserDefaults(suiteName: appGroup) }
+        return .standard
+    }
+
     /// Posted by the keyboard each time it reports Full Access (`recordFullAccess`).
     nonisolated static let fullAccessDarwinNotification = "anomaly.hex.mobile.keyboard.fullAccess"
     /// The keyboard's Darwin notification, forwarded on the main thread once
@@ -524,7 +543,7 @@ struct KeyboardBridge {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
-    init(defaults: UserDefaults? = UserDefaults(suiteName: Self.appGroup)) {
+    init(defaults: UserDefaults? = KeyboardBridge.storage) {
         self.defaults = defaults
     }
 

@@ -14,7 +14,7 @@ nonisolated struct HexWordsImport {
     private static let undoKey = "hexWords.undo"
     private let defaults: UserDefaults?
 
-    init(defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup)) {
+    init(defaults: UserDefaults? = KeyboardBridge.storage) {
         self.defaults = defaults
     }
 

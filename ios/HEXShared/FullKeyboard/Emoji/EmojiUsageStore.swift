@@ -22,7 +22,7 @@ final class EmojiUsageStore {
     /// Base emoji to the skin tone picked for it: 1 (light) to 5 (dark).
     private var tones: [String: Int]
 
-    init(defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup), now: @escaping () -> Date = Date.init) {
+    init(defaults: UserDefaults? = KeyboardBridge.storage, now: @escaping () -> Date = Date.init) {
         self.defaults = defaults
         self.now = now
         usage = defaults?.dictionary(forKey: Key.usage) as? [String: [Double]] ?? [:]

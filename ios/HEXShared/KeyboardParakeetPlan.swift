@@ -78,7 +78,7 @@ nonisolated enum KeyboardParakeetPlan: Equatable, Sendable {
     }
 
     static func current(
-        defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup),
+        defaults: UserDefaults? = KeyboardBridge.storage,
         preferred: [String] = Locale.preferredLanguages,
         physicalMemory: UInt64 = ProcessInfo.processInfo.physicalMemory,
         v2Downloaded: Bool = SpeechModelStore.isComplete(SpeechModelStore.parakeetV2),

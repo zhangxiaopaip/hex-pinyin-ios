@@ -92,16 +92,21 @@ final class KeyboardSetupMonitor {
             return
         }
 
-        let latest = bridge.fullAccess(activeSince: activeSince)
+        // Without the App Group the keyboard has nowhere to report to, and `AppleKeyboards` is
+        // often unreadable from an app, so this screen would wait on an answer that can never
+        // come — for a build whose keyboard works, just not through the group. There is
+        // nothing left to judge by, so the step passes instead of blocking setup forever.
+        let groupWorks = KeyboardBridge.appGroupAvailable
+        let latest = groupWorks ? bridge.fullAccess(activeSince: activeSince) : .on
         if fullAccess != latest { fullAccess = latest }
         // A keyboard that ever reported anything ran: that is proof enough that it is added,
         // which `AppleKeyboards` alone cannot give — an app reads that list only sometimes,
         // and a build with its own identifiers asks about a name the list may never use.
-        let heard = bridge.fullAccessOnReport != nil || bridge.fullAccessOffReport != nil
+        let heard = groupWorks && (bridge.fullAccessOnReport != nil || bridge.fullAccessOffReport != nil)
         if let keyboards = UserDefaults.standard.stringArray(forKey: "AppleKeyboards") {
             keyboardAdded = keyboards.contains(Self.keyboardBundleID) || fullAccessOn || heard
         } else {
-            keyboardAdded = fullAccessOn || heard ? true : nil
+            keyboardAdded = fullAccessOn || heard || !groupWorks ? true : nil
         }
         microphone = AVAudioApplication.shared.recordPermission
         bridge.appMicrophoneAllowed = microphone == .granted

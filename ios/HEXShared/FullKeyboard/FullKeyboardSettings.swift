@@ -25,7 +25,7 @@ nonisolated enum KoreanKeyboardExperiment {
     static let key = "experiments.koreanKeyboard"
 
     static var isEnabled: Bool {
-        UserDefaults(suiteName: KeyboardBridge.appGroup)?.bool(forKey: key) ?? false
+        KeyboardBridge.storage?.bool(forKey: key) ?? false
     }
 
     /// The flag in a store a caller already owns (LanguageSettings' injected defaults), so a
@@ -107,7 +107,7 @@ struct FullKeyboardSettings {
 
     private let defaults: UserDefaults?
 
-    init(defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup)) {
+    init(defaults: UserDefaults? = KeyboardBridge.storage) {
         self.defaults = defaults
     }
 

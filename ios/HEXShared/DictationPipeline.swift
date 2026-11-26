@@ -8,7 +8,7 @@ nonisolated struct DictationLowercaseSettings {
 
     private let defaults: UserDefaults?
 
-    init(defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup)) {
+    init(defaults: UserDefaults? = KeyboardBridge.storage) {
         self.defaults = defaults
     }
 
@@ -28,7 +28,7 @@ nonisolated struct DictationPeriodSettings {
 
     private let defaults: UserDefaults?
 
-    init(defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup)) {
+    init(defaults: UserDefaults? = KeyboardBridge.storage) {
         self.defaults = defaults
     }
 
@@ -51,7 +51,7 @@ nonisolated struct HinglishSettings {
 
     private let defaults: UserDefaults?
 
-    init(defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup)) {
+    init(defaults: UserDefaults? = KeyboardBridge.storage) {
         self.defaults = defaults
     }
 
@@ -91,7 +91,7 @@ nonisolated struct GreeklishSettings {
 
     private let defaults: UserDefaults?
 
-    init(defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup)) {
+    init(defaults: UserDefaults? = KeyboardBridge.storage) {
         self.defaults = defaults
     }
 

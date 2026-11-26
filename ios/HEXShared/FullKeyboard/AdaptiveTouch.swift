@@ -14,7 +14,7 @@ struct AdaptiveTouchSettings {
 
     private let defaults: UserDefaults?
 
-    init(defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup)) {
+    init(defaults: UserDefaults? = KeyboardBridge.storage) {
         self.defaults = defaults
     }
 
@@ -611,7 +611,7 @@ final class AdaptiveTouch {
         let generation = model.generation
         settings.summary = (Int(model.contexts.map(\.accepted).max() ?? 0), model.contexts.contains(where: \.inUse))
         Self.writer.async {
-            let resetAt = UserDefaults(suiteName: KeyboardBridge.appGroup)?.double(forKey: AdaptiveTouchSettings.Key.resetAt) ?? 0
+            let resetAt = KeyboardBridge.storage?.double(forKey: AdaptiveTouchSettings.Key.resetAt) ?? 0
             guard resetAt <= generation else {
                 try? FileManager.default.removeItem(at: url)
                 return

@@ -50,7 +50,7 @@ final class LearnedWordsStore {
     private var sessionKeepCounts: [String: Int] = [:]
     private var loadedAt = Date().timeIntervalSince1970
 
-    init(defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup), language: String? = nil) {
+    init(defaults: UserDefaults? = KeyboardBridge.storage, language: String? = nil) {
         self.defaults = defaults
         self.language = language
         load()

@@ -280,7 +280,7 @@ extension DictationController {
         access: SpeechRecognitionAccess = .system,
         resolve: (LanguageSettings) -> String? = { OnDeviceSpeechLanguages.resolve(settings: $0) }
     ) -> any LocalTranscribing {
-        let settings = LanguageSettings(defaults: UserDefaults(suiteName: suite))
+        let settings = LanguageSettings(defaults: suite == KeyboardBridge.appGroup ? KeyboardBridge.storage : UserDefaults(suiteName: suite))
         let wanted = wantedLanguage(settings: settings)
         guard choice.engine(for: wanted, appleSpeechPicks: false) == .onDeviceRecognizer else {
             return ParakeetTranscriber()
