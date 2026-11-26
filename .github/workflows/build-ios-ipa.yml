@@ -1,0 +1,70 @@
+name: Build iOS IPA
+
+# Builds Hex Mobile, its keyboard and its widgets into an unsigned .ipa on a GitHub macOS
+# runner, so the app can be installed without Xcode Cloud or an Apple Developer account:
+# Sideloadly (Windows or Mac) signs the .ipa with your own Apple ID as it installs it.
+#
+# Two archives come out of one run. The first is the app as the repo ships it, App Group and
+# App Store identifiers intact. The second rewrites the identifiers to the prefix below and
+# drops the App Group, which a free Apple ID cannot sign; try it when the first refuses to
+# sign because anomaly.hex.mobile is already taken.
+on:
+  workflow_dispatch:
+    inputs:
+      personal_prefix:
+        description: Bundle identifier prefix for the App-Group-free .ipa
+        type: string
+        default: com.example.hex
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-ios-ipa
+  cancel-in-progress: true
+
+jobs:
+  ipa:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # The app links FoundationModels and compiles Icon Composer's .icon, both of which are
+      # Xcode 26's; an older Xcode fails here rather than producing a quietly wrong app.
+      - name: Use Xcode 26
+        run: |
+          for candidate in /Applications/Xcode_26*.app /Applications/Xcode.app; do
+            if [ -d "$candidate" ]; then
+              sudo xcode-select -s "$candidate/Contents/Developer"
+              break
+            fi
+          done
+          xcodebuild -version
+          major=$(xcodebuild -version | head -1 | sed -E 's/^Xcode ([0-9]+).*/\1/')
+          if [ "$major" -lt 26 ]; then
+            echo "Xcode 26 or newer is needed; this runner offers $major." >&2
+            exit 1
+          fi
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Archive as it ships
+        working-directory: ios
+        run: IPA_NAME="Hex-unsigned" sh scripts/build-ipa.sh
+
+      - name: Archive for a free Apple ID
+        working-directory: ios
+        env:
+          PERSONAL_PREFIX: ${{ inputs.personal_prefix }}
+          IPA_NAME: Hex-personal
+          BUILD_DIR: ${{ github.workspace }}/ios/build/ipa-personal
+        run: sh scripts/build-ipa.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hex-ipa
+          path: ios/build/**/*.ipa
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,5 @@
+ios/build/
+ios/scripts/.build-german-capitals/
+__pycache__/
+.DS_Store
+xcuserdata/
