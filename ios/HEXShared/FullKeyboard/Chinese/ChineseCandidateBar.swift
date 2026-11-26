@@ -28,8 +28,11 @@ final class ChineseCandidateBar: UIView {
     /// How many words fit: about 40 pt a word, within what a thumb can hit.
     private var perPage: Int {
         let width = max(bounds.width, 200)
-        return min(9, max(5, Int(width / 40)))
+        return min(Self.maxSlots, max(5, Int(width / 40)))
     }
+
+    /// The most words a page holds, so the buttons exist before the bar has its width.
+    private static let maxSlots = 9
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -64,7 +67,7 @@ final class ChineseCandidateBar: UIView {
         }
         if words != self.words {
             self.words = words
-            page = min(page, max(0, pages - 1))
+            page = 0
             rebuild()
         }
     }
@@ -83,10 +86,14 @@ final class ChineseCandidateBar: UIView {
 
     private func rebuild() {
         let shown = pageWords
-        while slots.count < shown.count {
+        // Every slot the widest page holds exists from the first refresh: the bar is first
+        // shown before it is laid out, and a page must not lose the words it has room for now.
+        while slots.count < Self.maxSlots {
             let button = UIButton(type: .custom)
             button.titleLabel?.font = .systemFont(ofSize: 17)
             button.titleLabel?.lineBreakMode = .byTruncatingTail
+            button.setTitleColor(palette.textBase, for: .normal)
+            button.setTitleColor(palette.stripText, for: .highlighted)
             button.addTarget(self, action: #selector(pickWord(_:)), for: .touchUpInside)
             slots.append(button)
             addSubview(button)

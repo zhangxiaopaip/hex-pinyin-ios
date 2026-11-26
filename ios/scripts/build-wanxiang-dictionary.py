@@ -9,14 +9,22 @@ Line format: <word>TAB<syllables, space separated>TAB<weight>
 Output layout (little endian):
 
   magic "HXWX" | u16 version | u32 fullTable | u32 abbrevTable | u32 totalWeight
-  table (×2): 26 × (u32 offset, u32 length)   // one bucket per initial letter
+  | u32 prefixTable
+  table (×3): 26 × (u32 offset, u32 length)   // one bucket per initial letter
   blobs     : bucket bodies
 
   bucket body: u32 count | (count + 1) × u32 offsets | records
   record     : u8 keyLen | key | u16 wordCount | wordCount × (u8 len, word, u32 weight)
 
-The keyboard decodes one pinyin on demand, so a 200k-word dictionary costs a
-few mapped pages instead of tens of megabytes of Swift strings.
+Three tables:
+
+  full    the pinyin a word spells run together ("nihao"), its likeliest words
+  abbrev  简拼 initials ("nh")
+  prefix  the first one to three letters of a pinyin ("n", "ni", "nih"): what a half-typed
+          syllable may yet become, so the keyboard never has to scan keys for it
+
+The keyboard decodes one entry on demand, so a 400k-word dictionary costs a few
+mapped pages instead of tens of megabytes of Swift strings.
 
 Run: python build-wanxiang-dictionary.py <dict dir> <out file>
 """
@@ -30,13 +38,19 @@ from collections import defaultdict
 # Only these are worth shipping: longer entries are rare names that crowd the
 # candidate list without ever being typed.
 MAX_WORD_LEN = 6
-# Per-key words kept, the likeliest first.
-WORDS_PER_KEY = 12
+# Per-key words kept, the likeliest first. A syllable typed whole fills a page of the
+# candidate bar with its characters and still leaves room for the phrases they start.
+WORDS_PER_KEY = 24
 # How many entries survive the weight cut (~1.7M lines in the source).
-MAX_ENTRIES = 300_000
+MAX_ENTRIES = 420_000
 # 简拼 is only built for words short enough to be worth abbreviating.
 MAX_ABBREV_SYLLABLES = 5
 MAX_ABBREV_WORDS = 6
+# A half-typed syllable is guessed from its first letters, and holds a page of words.
+MAX_PREFIX_LENGTH = 3
+WORDS_PER_PREFIX = 12
+# The likeliest words of each key feed the prefix table: enough to rank a syllable.
+PREFIX_SOURCE_WORDS = 2
 
 
 def fold(syllable):
@@ -109,6 +123,22 @@ def encode_table(entries, per_key):
     return [encode_bucket(sorted(buckets.get(index, []))) for index in range(26)]
 
 
+def build_prefixes(full):
+    """What a half-typed syllable may yet become, per one-to-three letter prefix."""
+    gathered = defaultdict(list)
+    for key, words in full.items():
+        for size in range(1, min(MAX_PREFIX_LENGTH, len(key)) + 1):
+            gathered[key[:size]].extend(words[:PREFIX_SOURCE_WORDS])
+    prefixes = {}
+    for prefix, words in gathered.items():
+        best = {}
+        for word, weight in words:
+            if best.get(word, 0) < weight:
+                best[word] = weight
+        prefixes[prefix] = sorted(best.items(), key=lambda item: item[1], reverse=True)[:WORDS_PER_PREFIX]
+    return prefixes
+
+
 def main():
     source, output = sys.argv[1], sys.argv[2]
 
@@ -156,23 +186,28 @@ def main():
             abbrev[key].append((word, weight))
     abbrev = {k: sorted(v, key=lambda w: w[1], reverse=True)[:MAX_ABBREV_WORDS] for k, v in abbrev.items()}
 
-    print(f"{len(full)} full keys, {len(abbrev)} abbrev keys, total weight {total_weight}")
+    prefixes = build_prefixes(full)
+    print(f"{len(full)} full keys, {len(abbrev)} abbrev keys, {len(prefixes)} prefixes, "
+          f"total weight {total_weight}")
     sys.stdout.flush()
 
     full_blobs = encode_table(full, WORDS_PER_KEY)
     abbrev_blobs = encode_table(abbrev, MAX_ABBREV_WORDS)
+    prefix_blobs = encode_table(prefixes, WORDS_PER_PREFIX)
 
-    header_size = 4 + 2 + 4 * 3
+    header_size = 4 + 2 + 4 * 4
     table_size = 26 * 8
     full_table_at = header_size
     full_blob_at = full_table_at + table_size
     abbrev_table_at = full_blob_at + sum(len(b) for b in full_blobs)
     abbrev_blob_at = abbrev_table_at + table_size
+    prefix_table_at = abbrev_blob_at + sum(len(b) for b in abbrev_blobs)
+    prefix_blob_at = prefix_table_at + table_size
 
     with open(output, "wb") as handle:
         handle.write(b"HXWX")
-        handle.write(struct.pack("<H", 1))
-        handle.write(struct.pack("<III", full_table_at, abbrev_table_at, total_weight))
+        handle.write(struct.pack("<H", 2))
+        handle.write(struct.pack("<IIII", full_table_at, abbrev_table_at, total_weight, prefix_table_at))
         offset = full_blob_at
         for blob in full_blobs:
             handle.write(struct.pack("<II", offset, len(blob)))
@@ -184,6 +219,12 @@ def main():
             handle.write(struct.pack("<II", offset, len(blob)))
             offset += len(blob)
         for blob in abbrev_blobs:
+            handle.write(blob)
+        offset = prefix_blob_at
+        for blob in prefix_blobs:
+            handle.write(struct.pack("<II", offset, len(blob)))
+            offset += len(blob)
+        for blob in prefix_blobs:
             handle.write(blob)
 
     print(f"wrote {output} ({os.path.getsize(output)} bytes)")

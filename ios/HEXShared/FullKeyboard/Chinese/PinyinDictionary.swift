@@ -13,7 +13,7 @@ private func hexU32(_ bytes: UnsafeRawBufferPointer, _ offset: Int) -> UInt32 {
 /// https://github.com/amzxyz/rime-wanxiang) into `Wanxiang.pinyin` by
 /// `ios/scripts/build-wanxiang-dictionary.py`.
 ///
-/// The file is memory-mapped and decoded one pinyin at a time: a 300,000-word dictionary
+/// The file is memory-mapped and decoded one pinyin at a time: a 400,000-word dictionary
 /// costs a mapped file and the few pages it reads, not tens of megabytes of Swift strings —
 /// which is what a keyboard extension's memory limit makes a difference about. A lookup is a
 /// binary search inside the first letter's bucket, so typing stays cheap however large the
@@ -36,13 +36,15 @@ nonisolated final class PinyinDictionary: @unchecked Sendable {
     /// How many paths a run keeps per position: enough for every reading of a long run.
     private static let beam = 32
     /// How many half-typed syllables, and words of each, a run's end offers.
-    private static let partials = 6
+    private static let partials = 12
     /// What a half-typed syllable costs a candidate: it may still turn into another word.
     private static let partialPenalty = 1.5
     /// What a 简拼 (initials-only) reading costs: it is a guess, where a full pinyin is not.
     private static let abbrevPenalty = 2.5
     /// The longest key a single step can use, which bounds a lookup's steps.
     private static let maxKeyLength = 24
+    /// The longest beginning of a pinyin the half-syllable table holds ("nih", not "nihao").
+    private static let maxPrefixLength = 3
     /// Cached lookups: typing and deleting revisit the same keys constantly.
     private static let cacheLimit = 512
 
@@ -50,6 +52,8 @@ nonisolated final class PinyinDictionary: @unchecked Sendable {
     private let mapSize: Int
     private let fullTableAt: Int
     private let abbrevTableAt: Int
+    /// The words a half-typed syllable may become. 0 in a version 1 file, which had none.
+    private let prefixTableAt: Int
     private let logTotal: Double
 
     private let lock = NSLock()
@@ -100,6 +104,8 @@ nonisolated final class PinyinDictionary: @unchecked Sendable {
         self.mapSize = Int(size)
         self.fullTableAt = Int(hexU32(bytes, 6))
         self.abbrevTableAt = Int(hexU32(bytes, 10))
+        // Version 2 added the half-syllable table at the header's end.
+        self.prefixTableAt = bytes.count > 26 ? Int(hexU32(bytes, 18)) : 0
         self.logTotal = log(max(Double(hexU32(bytes, 14)), 2))
     }
 
@@ -108,6 +114,7 @@ nonisolated final class PinyinDictionary: @unchecked Sendable {
         self.mapSize = 0
         self.fullTableAt = 0
         self.abbrevTableAt = 0
+        self.prefixTableAt = 0
         self.logTotal = 1
     }
 
@@ -152,33 +159,6 @@ nonisolated final class PinyinDictionary: @unchecked Sendable {
         }
         if length == wanted.count { return 0 }
         return length < wanted.count ? -1 : 1
-    }
-
-    /// Whether a record's key sorts before `wanted`, a longer key that starts with it
-    /// counting as after.
-    private func sortsBefore(_ record: Int, _ wanted: [UInt8]) -> Bool {
-        guard let mapping, record >= 0, record < mapping.count else { return false }
-        let length = Int(mapping[record])
-        let start = record + 1
-        guard start + length <= mapping.count else { return false }
-        var index = 0
-        while index < length && index < wanted.count {
-            let left = mapping[start + index]
-            if left != wanted[index] { return left < wanted[index] }
-            index += 1
-        }
-        return index < wanted.count
-    }
-
-    /// Whether a record's key starts with `wanted`.
-    private func starts(with wanted: [UInt8], record: Int) -> Bool {
-        guard let mapping, record >= 0, record < mapping.count else { return false }
-        let length = Int(mapping[record])
-        guard length >= wanted.count, record + 1 + wanted.count <= mapping.count else { return false }
-        for offset in 0..<wanted.count where mapping[record + 1 + offset] != wanted[offset] {
-            return false
-        }
-        return true
     }
 
     /// Every word a pinyin spells, the likeliest first.
@@ -235,28 +215,11 @@ nonisolated final class PinyinDictionary: @unchecked Sendable {
         return out
     }
 
-    /// The likeliest words whose pinyin starts with `prefix`, for a half-typed syllable.
+    /// The likeliest words whose pinyin starts with `prefix`, for a half-typed syllable
+    /// ("w" -> 我, "sh" -> 是, "nih" -> 你好): a table of its own, so no scanning of keys.
     private func wordsStarting(with prefix: String, limit: Int) -> [Word] {
-        let wanted = Array(prefix.utf8)
-        guard let first = wanted.first, let bucket = bucket(at: fullTableAt, letter: first) else { return [] }
-
-        // The first key at or after the prefix, then the keys it starts.
-        var low = 0
-        var high = bucket.count
-        while low < high {
-            let middle = (low + high) / 2
-            guard let at = record(middle, in: bucket) else { break }
-            if sortsBefore(at, wanted) { low = middle + 1 } else { high = middle }
-        }
-
-        var out: [Word] = []
-        var index = low
-        while index < bucket.count, index < low + 40 {
-            guard let at = record(index, in: bucket), starts(with: wanted, record: at) else { break }
-            out.append(contentsOf: words(at: at).prefix(2))
-            index += 1
-        }
-        return Array(out.sorted { $0.weight > $1.weight }.prefix(limit))
+        guard prefixTableAt > 0, prefix.count <= Self.maxPrefixLength else { return [] }
+        return Array(lookup(prefix, at: prefixTableAt).prefix(limit))
     }
 
     // MARK: - Candidates
@@ -302,10 +265,15 @@ nonisolated final class PinyinDictionary: @unchecked Sendable {
 
         var found = best[letters.count]
 
-        // Half a syllable at the end: the words it may yet become, behind the ones it spells.
+        // Half a syllable at the end: the words it may yet become, behind the ones it spells
+        // ("nih" -> 你好). A tail that already spells something is spelled above, and a single
+        // letter is only guessed at when nothing spells the run, so "zhang" is not padded with
+        // 展改 and 战该 — while "zhongg" still reads as 中 and the letter it ends on.
+        let spellsTheRun = !best[letters.count].isEmpty
         for position in 0..<letters.count where !best[position].isEmpty {
             let tail = String(decoding: letters[position...], as: UTF8.self)
-            guard tail.count <= 6 else { continue }
+            guard tail.count <= 6, tail.count >= 2 || !spellsTheRun else { continue }
+            guard words(for: tail).isEmpty else { continue }
             for word in wordsStarting(with: tail, limit: Self.partials) {
                 for path in best[position].sorted { $0.score > $1.score }.prefix(Self.partials) {
                     found.append(
@@ -326,9 +294,18 @@ nonisolated final class PinyinDictionary: @unchecked Sendable {
 
         // The typist's own picks move up: what they chose before is what they mean now.
         let learned = UserWords.shared
+        // A syllable typed whole leads with the characters it spells, as Apple's keyboard
+        // does ("zhang" -> 张 长 章 涨 …, then 障碍, 长大), instead of putting whichever
+        // phrase is commoner than the character first.
+        let characters = Set(words(for: input).lazy.filter { $0.text.count == 1 }.map(\.text))
         let scored = found.map { path in
             Path(score: path.score + learned.boost(for: path.text), text: path.text)
-        }.sorted { $0.score > $1.score }
+        }.sorted { left, right in
+            let leftIsCharacter = characters.contains(left.text)
+            let rightIsCharacter = characters.contains(right.text)
+            if leftIsCharacter != rightIsCharacter { return leftIsCharacter }
+            return left.score > right.score
+        }
 
         var seen = Set<String>()
         var out: [String] = []

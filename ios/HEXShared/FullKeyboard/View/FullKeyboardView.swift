@@ -939,8 +939,11 @@ final class FullKeyboardView: UIView {
         }
         stripOffer = clipboardOffer
         // 简体中文: the candidate bar takes the strip while a pinyin run composes — its words,
-        // not three predictive slots. Everything else the strip carries keeps its place.
-        let composingChinese = engine.composesChinese && engine.chinese.hasRun
+        // not three predictive slots. The words are what say a run is composing: a run whose
+        // letters the host already took (a cursor move, another field) has none, and the strip
+        // comes back with them.
+        let chineseWords = engine.chinese.words
+        let composingChinese = engine.composesChinese && (engine.chinese.hasRun || !chineseWords.isEmpty)
         var suggestions = composingChinese
             ? []
             : withStripEmoji(engine.suggestions, quiet: lastDictation != nil || status != nil || clipboardOffer != nil)
@@ -961,10 +964,18 @@ final class FullKeyboardView: UIView {
             fullAccessHint: showsFullAccessHint && !model.hasFullAccess,
             notice: dictationBlockNotice ?? allowPasteNotice ?? vocabularyNotice ?? stoppedNotice ?? translationNotice ?? modelNotice
         )
-        chineseBar.isHidden = !composingChinese || selection != nil || emojiPanel != nil || showsRecording
+        // A pinyin run takes the strip's row outright: its three predictive slots showing a
+        // few of its words would sit over the bar, so the strip steps aside while it shows.
         if composingChinese {
-            chineseBar.show(words: engine.chinese.words, generation: engine.chinese.generation)
+            stripView.isHidden = true
+        } else if !selectionTookStrip, selection == nil, emojiPanel == nil, !showsRecording {
+            stripView.isHidden = false
         }
+        chineseBar.isHidden = !composingChinese || selection != nil || emojiPanel != nil || showsRecording
+        chineseBar.show(
+            words: composingChinese ? chineseWords : [],
+            generation: engine.chinese.generation
+        )
     }
 
     /// Why the Hex key can't dictate here, from iOS 26 (`KeyboardDictationBlock`): one line, Open
