@@ -36,7 +36,7 @@ final class PinyinKeyboardTests: XCTestCase {
         type("nihao")
         XCTAssertEqual(target.text, "nihao")
         XCTAssertEqual(engine.chinese.buffer, "nihao")
-        XCTAssertEqual(engine.suggestions.map(\.replacement), ["你好", "你号", "你毫米"])
+        XCTAssertEqual(engine.suggestions.first?.replacement, "你好")
     }
 
     /// Space puts the strip's first word in place of the letters, and types no space after it,
@@ -61,7 +61,9 @@ final class PinyinKeyboardTests: XCTestCase {
 
     /// A slot picked replaces the run with its own word.
     func testAPickedSlotReplacesTheRun() {
-        type("nihao")
+        // 万象拼音 gives 你好 alone for nihao, so a run with several readings ("shi") is
+        // where a second slot exists to pick.
+        type("shi")
         guard let second = engine.suggestions.dropFirst().first else { return XCTFail("no second slot") }
         engine.acceptSuggestion(second)
         XCTAssertEqual(target.text, second.replacement)

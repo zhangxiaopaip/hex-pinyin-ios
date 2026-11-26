@@ -67,9 +67,12 @@ extension FullKeyboardEngine {
         }
     }
 
-    /// A strip slot picked: the word goes in place of the run's letters.
+    /// A strip slot picked: the word goes in place of the run's letters. What was picked is
+    /// learned, so the word comes first the next time its pinyin is typed (Rime's user
+    /// dictionary, kept small).
     func pickChineseWord(_ word: String) {
         guard chinese.hasRun, chinese.words.contains(word) else { return }
+        UserWords.shared.learn(word)
         replaceChineseRun(with: word)
     }
 

@@ -1,15 +1,24 @@
 import Foundation
 
 /// Settings › Keyboard › Languages › 简体中文, and the pinyin run its keys feed
-/// (`FullKeyboardEngine+Chinese`): the letters typed stay in the field ("nihao") and the strip
-/// offers the words they spell. Picking one, or a space, return or mark that ends the run,
-/// replaces the letters with it.
+/// (`FullKeyboardEngine+Chinese`): the letters typed stay in the field ("nihao") and the
+/// candidate bar offers the words they spell. Picking one, or a space, return or mark that
+/// ends the run, replaces the letters with it.
+///
+/// The run asks 万象拼音's dictionary (Rime's word list) for its candidates, which come
+/// likeliest first: whole words, several words read as one, half-typed syllables and
+/// 简拼 initials, as Rime's engine offers them.
 nonisolated struct ChineseKeyboardState: Sendable {
+    /// How many words a run keeps: the bar pages through them.
+    static let candidates = 60
+
     /// The pinyin letters in the field now.
     private(set) var buffer = ""
     /// What they spell, the likeliest first: kept beside the buffer, so a strip refresh while
     /// no key changed costs nothing, and the run's words are read once.
     private(set) var words: [String] = []
+    /// Bumped whenever the run changes, so the bar turns back to its first page.
+    private(set) var generation = 0
 
     /// Whether a run is composing: its letters are in the field, waiting for a word.
     var hasRun: Bool { !buffer.isEmpty }
@@ -17,20 +26,23 @@ nonisolated struct ChineseKeyboardState: Sendable {
     /// A pinyin letter typed.
     mutating func type(_ letter: String) {
         buffer += letter
-        words = PinyinDictionary.shared.candidates(for: buffer)
+        words = PinyinDictionary.shared.candidates(for: buffer, limit: Self.candidates)
+        generation += 1
     }
 
     /// The last letter taken back: delete takes the run back one letter at a time.
     mutating func removeLast() {
         guard !buffer.isEmpty else { return }
         buffer.removeLast()
-        words = buffer.isEmpty ? [] : PinyinDictionary.shared.candidates(for: buffer)
+        words = buffer.isEmpty ? [] : PinyinDictionary.shared.candidates(for: buffer, limit: Self.candidates)
+        generation += 1
     }
 
     /// The run ended: its letters, where they stayed in the field, are the host's text.
     mutating func reset() {
         buffer = ""
         words = []
+        generation += 1
     }
 }
 

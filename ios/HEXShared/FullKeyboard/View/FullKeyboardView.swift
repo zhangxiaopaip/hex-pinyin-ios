@@ -34,6 +34,9 @@ final class FullKeyboardView: UIView {
     var onReturnKey: (() -> Void)?
 
     let stripView = KeyboardStripView()
+    /// 简体中文's candidates, in the strip's place while a pinyin run composes: Apple's
+    /// Chinese keyboard has a bar of its own, and three predictive slots are too few.
+    let chineseBar = ChineseCandidateBar()
     /// The strip's two-thumb selection: the range, then its actions (Settings › Labs).
     let selectionStrip = TrackpadSelectionStripView()
     /// The keys' touch surface; tests feed it touch samples.
@@ -164,6 +167,14 @@ final class FullKeyboardView: UIView {
         backgroundColor = .clear
 
         addSubview(stripView)
+        addSubview(chineseBar)
+        chineseBar.isHidden = true
+        chineseBar.onPick = { [weak self] word in
+            guard let self else { return }
+            self.keyFeedback()
+            self.engine.pickChineseWord(word)
+            self.refreshStrip()
+        }
         addSubview(plane)
         addSubview(selectionStrip)
         addSubview(hexKey)
@@ -775,6 +786,7 @@ final class FullKeyboardView: UIView {
         callout.frame = content
         accentCallout.frame = content
         stripView.frame = layout.stripFrame.offsetBy(dx: 0, dy: lift)
+        chineseBar.frame = stripView.frame
         selectionStrip.frame = stripView.frame
         stripView.slotFrames = layout.stripSlotFrames.map { $0.offsetBy(dx: -layout.stripFrame.minX, dy: -layout.stripFrame.minY) }
         stripView.pillInset = layout.metrics.stripInset
@@ -840,6 +852,7 @@ final class FullKeyboardView: UIView {
         didApplyPalette = true
         palette = next
         stripView.palette = next
+        chineseBar.palette = next
         selectionStrip.palette = next
         plane.palette = next
         callout.palette = next
@@ -925,7 +938,12 @@ final class FullKeyboardView: UIView {
             if clipboardOffer?.leadsToAppleKeyboard != true { clipboardOffer = .dictation }
         }
         stripOffer = clipboardOffer
-        var suggestions = withStripEmoji(engine.suggestions, quiet: lastDictation != nil || status != nil || clipboardOffer != nil)
+        // 简体中文: the candidate bar takes the strip while a pinyin run composes — its words,
+        // not three predictive slots. Everything else the strip carries keeps its place.
+        let composingChinese = engine.composesChinese && engine.chinese.hasRun
+        var suggestions = composingChinese
+            ? []
+            : withStripEmoji(engine.suggestions, quiet: lastDictation != nil || status != nil || clipboardOffer != nil)
         // The experiment hides the words, not the strip: Undo, Paste, status, notices and the
         // Hex key keep their places, and an empty strip offers the clipboard as it does when no
         // word is suggested. What you typed before a correction (`.revert`) stays, so Delete
@@ -943,6 +961,10 @@ final class FullKeyboardView: UIView {
             fullAccessHint: showsFullAccessHint && !model.hasFullAccess,
             notice: dictationBlockNotice ?? allowPasteNotice ?? vocabularyNotice ?? stoppedNotice ?? translationNotice ?? modelNotice
         )
+        chineseBar.isHidden = !composingChinese || selection != nil || emojiPanel != nil || showsRecording
+        if composingChinese {
+            chineseBar.show(words: engine.chinese.words, generation: engine.chinese.generation)
+        }
     }
 
     /// Why the Hex key can't dictate here, from iOS 26 (`KeyboardDictationBlock`): one line, Open

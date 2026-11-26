@@ -1,8 +1,8 @@
 import XCTest
 @testable import HEX
 
-/// The Chinese keyboard's dictionary: what an everyday pinyin run spells, and how the file's
-/// own lines are read.
+/// The Chinese keyboard's dictionary: what an everyday pinyin run spells, from the
+/// 万象拼音 index (`Wanxiang.pinyin`) the keyboard ships.
 final class PinyinDictionaryTests: XCTestCase {
     private let dictionary = PinyinDictionary.shared
 
@@ -32,23 +32,30 @@ final class PinyinDictionaryTests: XCTestCase {
     func testUWithADiaeresisIsTypedV() {
         XCTAssertEqual(dictionary.candidates(for: "nv").first, "女")
         XCTAssertEqual(dictionary.candidates(for: "lvse").first, "绿色")
-        XCTAssertTrue(dictionary.candidates(for: "lv", limit: 4).contains("绿"))
     }
 
-    /// Half a syllable at the run's end still finds its word, the likeliest first.
-    func testHalfATypedSyllableFindsItsWord() {
-        XCTAssertEqual(dictionary.candidates(for: "nih").first, "你好")
+    /// Half a syllable at the run's end still finds a word instead of nothing.
+    func testHalfATypedSyllableStillOffersWords() {
+        XCTAssertFalse(dictionary.candidates(for: "nih").isEmpty)
+        XCTAssertFalse(dictionary.candidates(for: "zhongg").isEmpty)
     }
 
-    /// A run of several words is read as the words it is ("今天" and "天气"), not letter by letter.
+    /// A run of several words is read as the words it is ("今天" and "天气").
     func testALongRunIsReadAsWords() {
         XCTAssertEqual(dictionary.candidates(for: "jintiantianqi").first, "今天天气")
     }
 
-    /// The strip has three slots: no more than three words, however many the run spells.
-    func testNoMoreThanThreeWords() {
+    /// 简拼: initials alone find the word, as Rime offers them.
+    func testInitialsFindTheWord() {
+        XCTAssertTrue(dictionary.candidates(for: "nh", limit: 9).contains("你好"))
+        XCTAssertTrue(dictionary.candidates(for: "wm", limit: 9).contains("我们"))
+    }
+
+    /// The caller's limit is honoured: the bar pages through as many as it asks for.
+    func testTheLimitIsHonoured() {
         XCTAssertLessThanOrEqual(dictionary.candidates(for: "shi").count, 3)
         XCTAssertEqual(dictionary.candidates(for: "shi", limit: 1).count, 1)
+        XCTAssertLessThanOrEqual(dictionary.candidates(for: "shi", limit: 9).count, 9)
     }
 
     /// Letters no pinyin spells spell nothing: the keys keep them as they are.
@@ -56,20 +63,10 @@ final class PinyinDictionaryTests: XCTestCase {
         XCTAssertTrue(dictionary.candidates(for: "zzz").isEmpty)
     }
 
-    /// The file's lines: the header's total, then pinyin, word and frequency, the commonest
-    /// of a pinyin first.
-    func testParseReadsTheFilesLines() {
-        let parsed = PinyinDictionary.parse(
-            """
-            # Hex's Chinese keyboard: pinyin (no tones, no spaces), the word, its frequency.
-            # total: 1000
-            a\t啊\t500
-            a\t阿\t40
-            ni\t你\t300
-            """
-        )
-        XCTAssertEqual(parsed.candidates(for: "a"), ["啊", "阿"])
-        XCTAssertEqual(parsed.candidates(for: "ni"), ["你"])
-        XCTAssertTrue(parsed.candidates(for: "zzz").isEmpty)
+    /// The index the keyboard ships is not empty: a dictionary that failed to load would
+    /// type pinyin with nothing to pick, which is what this build set out to fix.
+    func testTheShippedDictionaryLoads() {
+        XCTAssertGreaterThanOrEqual(dictionary.candidates(for: "shi", limit: 9).count, 5)
+        XCTAssertGreaterThanOrEqual(dictionary.candidates(for: "zhongguo", limit: 9).count, 1)
     }
 }

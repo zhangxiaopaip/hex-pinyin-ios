@@ -23,7 +23,11 @@ targets:
     platform: iOS
     sources:
       - HEXMobile
-      - HEXShared
+      # The pinyin dictionary belongs to the keyboard extension alone: the app reads it
+      # from the appex when it previews 简体中文, which keeps ~12 MB out of the app.
+      - path: HEXShared
+        excludes:
+          - "FullKeyboard/Chinese/Wanxiang.pinyin"
       - HEXActivity
       - path: ../app/AppIcon.icon
         buildPhase: resources
