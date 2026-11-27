@@ -81,8 +81,10 @@ extension FullKeyboardEngine {
         replaceChineseRun(with: word)
     }
 
-    /// Space, or a mark or return that ends the run: its first word goes in, and no space, as
-    /// Apple's Chinese keyboard does. False when no run is composing, so the key acts as usual.
+    /// Space, or a mark that ends the run: its first word goes in, and no space, as Apple's
+    /// Chinese keyboard does. Return ends the run with the letters as typed instead (Rime's
+    /// 回车上屏原文), so it does not come here. False when no run is composing, so the key
+    /// acts as usual.
     @discardableResult
     func pickFirstChineseWord() -> Bool {
         guard composesChinese, chinese.hasRun else { return false }

@@ -782,7 +782,10 @@ final class FullKeyboardEngine {
                 typeSpace(at: CGPoint(x: layout.unsplitX(touch.startPoint.x), y: touch.startPoint.y))
             }
         case .returnKey:
-            pickFirstChineseWord()
+            // 简体中文: return commits the run's letters as typed (Rime's 回车上屏原文), not
+            // its first word — the letters are the field's already, so ending the run only
+            // forgets it, and the new line goes in after them. Space and the marks pick the
+            // first word; return is "I meant the letters".
             commitCompositions()
             if target.enablesReturnKeyAutomatically == true && !target.hasText {
                 typingLog?.edit("return", [

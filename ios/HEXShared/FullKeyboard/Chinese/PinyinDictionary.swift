@@ -332,13 +332,22 @@ nonisolated final class PinyinDictionary: @unchecked Sendable {
         }
 
         // 简拼: initials only ("nh", "zg"), which Rime offers beside the full spelling. Only
-        // when nothing spells the run: a spelled run's initials are the same word again.
+        // when nothing spells the run: a spelled run's initials are the same word again. The
+        // dictionary's initials table answers with its words, and `PinyinShortPhrases` adds
+        // the phrases a chat says that no word list holds ("fyx" -> 发一下), any syllable of
+        // which may be typed whole ("fyxia" answers it too).
         if found.isEmpty {
             let initials = String(decoding: letters, as: UTF8.self)
             if initials.count >= 2, initials.count <= 6 {
                 for word in abbrevWords(for: initials) {
                     found.append(Path(score: word.logWeight - logTotal - Self.abbrevPenalty,
                                       text: word.text, spelling: initials))
+                }
+            }
+            if initials.count >= 2, initials.count <= 12 {
+                for phrase in PinyinShortPhrases.shared.words(for: initials) {
+                    found.append(Path(score: log(max(phrase.weight, 1)) - logTotal - Self.abbrevPenalty,
+                                      text: phrase.text, spelling: initials))
                 }
             }
         }

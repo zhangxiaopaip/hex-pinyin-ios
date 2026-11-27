@@ -38,6 +38,7 @@ if command -v swiftc >/dev/null 2>&1; then
   swiftc -swift-version 6 -parse-as-library \
     HEXShared/FullKeyboard/Chinese/PinyinIndex.swift \
     HEXShared/FullKeyboard/Chinese/PinyinCorrection.swift \
+    HEXShared/FullKeyboard/Chinese/PinyinShortPhrases.swift \
     HEXShared/FullKeyboard/Chinese/PinyinDictionary.swift \
     scripts/verify-pinyin-stubs.swift \
     scripts/verify-pinyin-index.swift \

@@ -5,6 +5,7 @@ import Foundation
 ///
 ///     swiftc -parse-as-library HEXShared/FullKeyboard/Chinese/PinyinIndex.swift \
 ///         HEXShared/FullKeyboard/Chinese/PinyinCorrection.swift \
+///         HEXShared/FullKeyboard/Chinese/PinyinShortPhrases.swift \
 ///         HEXShared/FullKeyboard/Chinese/PinyinDictionary.swift \
 ///         scripts/verify-pinyin-stubs.swift scripts/verify-pinyin-index.swift \
 ///         -o /tmp/verify-pinyin && /tmp/verify-pinyin
@@ -89,6 +90,40 @@ struct VerifyPinyinIndex {
         expectWord("zhagn", "张", spelling: "zhang")
         // A key held too long: the run is read again with the second letter taken out.
         expectWord("nihhaoo", "你好", spelling: "nihao")
+
+        // 简拼 phrases (`PinyinShortPhrases`): initials the dictionary spells with stray words,
+        // and the phrase a chat says instead — "fyx" was 放一些 and nothing of 发一下 before the
+        // table, and a syllable typed whole answers too ("fyxia"). The spelling shown is the
+        // initials as typed, no split a syllable would give them.
+        expectWord("fyx", "发一下", spelling: "fyx")
+        expectWord("fyxia", "发一下", spelling: "fyxia")
+        expectWord("dyx", "点一下")
+        expectWord("hgxx", "回个消息")
+
+        // The phrase table against the shipped file: every syllable is a pinyin the
+        // dictionary spells, every entry reachable through its own initials, and no phrase
+        // listed twice — a typo in the hand-written list would surface here, not on a phone.
+        var listed: Set<String> = []
+        for (text, spelling) in PinyinShortPhrases.shared.allEntries() {
+            let syllables = spelling.split(separator: "'").map(String.init)
+            if syllables.isEmpty || syllables.contains(where: { dictionary.words(for: $0).isEmpty }) {
+                failures += 1
+                print("  FAIL phrase \(text): \(spelling) is not a spelling of real syllables")
+            }
+            let initials = syllables.map { String($0.first!) }.joined()
+            let found = PinyinShortPhrases.shared.words(for: initials).map { $0.text }
+            if !found.contains(text) {
+                failures += 1
+                print("  FAIL phrase \(text): initials \(initials) do not answer it, got \(found.prefix(4))")
+            }
+            if !listed.insert("\(text)|\(spelling)").inserted {
+                failures += 1
+                print("  FAIL phrase \(text) (\(spelling)) listed twice")
+            }
+        }
+        if failures == 0 {
+            print("  ok   phrases: \(PinyinShortPhrases.shared.allEntries().count) entries, all syllables real, all initials answer")
+        }
 
         // The line above the words, syllables apart as 豆包 shows them.
         for (run, apart) in [("nihao", "ni'hao"), ("zhongguo", "zhong'guo"), ("jintiantianqi", "jin'tian'tian'qi")] {

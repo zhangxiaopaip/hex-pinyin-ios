@@ -2,8 +2,8 @@ import Foundation
 
 /// Settings › Keyboard › Languages › 简体中文, and the pinyin run its keys feed
 /// (`FullKeyboardEngine+Chinese`): the letters typed stay in the field ("nihao") and the
-/// candidate bar offers the words they spell. Picking one, or a space, return or mark that
-/// ends the run, replaces the letters with it.
+/// candidate bar offers the words they spell. Picking one, or a space or mark that ends the
+/// run, replaces the letters with it; return commits the letters as typed instead.
 ///
 /// The run asks 万象拼音's dictionary (Rime's word list) for its candidates, which come
 /// likeliest first: whole words, several words read as one, half-typed syllables and
